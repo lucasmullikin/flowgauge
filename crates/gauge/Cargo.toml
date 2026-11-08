@@ -1,0 +1,11 @@
+[package]
+name = "gauge"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+gauge-core = { path = "../gauge-core" }
+serde = "1"
+libc = "0.2"
+serde_json = "1"

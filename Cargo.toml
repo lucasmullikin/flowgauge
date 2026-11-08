@@ -1,0 +1,11 @@
+[workspace]
+resolver = "3"
+members = ["crates/smc", "crates/fan-spike", "crates/gauge-core", "crates/gauge", "crates/gauge-app", "crates/fan-proto", "crates/gauge-fand"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "GPL-3.0-or-later"
+
+[profile.release]
+panic = "unwind"

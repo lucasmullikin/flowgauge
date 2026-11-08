@@ -1,0 +1,10 @@
+[package]
+name = "gauge-fand"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+smc = { path = "../smc" }
+fan-proto = { path = "../fan-proto" }
+libc = "0.2"

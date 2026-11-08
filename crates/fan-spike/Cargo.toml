@@ -1,0 +1,9 @@
+[package]
+name = "fan-spike"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+smc = { path = "../smc" }
+libc = "0.2"

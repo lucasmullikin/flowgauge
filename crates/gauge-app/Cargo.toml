@@ -1,0 +1,17 @@
+[package]
+name = "gauge-app"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+gauge-core = { path = "../gauge-core" }
+fan-proto = { path = "../fan-proto" }
+libc = "0.2"
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
+objc2-core-location = "0.3"
+objc2-core-graphics = "0.3"
+objc2-quartz-core = "0.3"
