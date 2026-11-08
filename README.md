@@ -12,13 +12,15 @@ FlowGauge was called Gauge until November 2026. The first time it runs, it moves
 
 ## Status
 
-Tested on one machine only: an M1 Max MacBook Pro on macOS 27. Other Macs are untested, and fan control is expected to fail on many of them:
+Tested on two Macs: an M1 Max MacBook Pro on macOS 27, and an M1 Max Mac Studio on macOS 26.6. Other Macs are untested, and fan control is expected to fail on many of them:
 
 - The helper refuses to run on Macs with the `Ftst` key, which reportedly includes M3 and M4 models.
 - Macs that use the lowercase `F0md` key, reportedly the M5, aren't supported.
 - Intel Macs aren't supported.
 
-On that Mac, fan control has been tested with both fans moving between 2,000 and 4,000 rpm, and with the return to Auto after a disconnect, a hang, a killed app and a crashed helper. Temperature curves have been tested at moderate temperatures (the Cool curve held both fans near 3,100 rpm at 63°C) but not below the first point of a curve. Fans that macOS has stopped take about 10 to 15 seconds to spin back up when FlowGauge sets a speed. The charge limit has been tested on a real charge: set to 80% while plugged in, the battery stopped charging at 80% and held there, and charging resumed within about two minutes of turning the limit off.
+On the Mac Studio, the app's self-test passes, fan control works through the helper (the Cool curve held both fans near 2,600 rpm at 73°C), and the Power panel works without a battery, showing only what the power supply delivers. Charge limit and battery details don't apply there.
+
+On the MacBook Pro, fan control has been tested with both fans moving between 2,000 and 4,000 rpm, and with the return to Auto after a disconnect, a hang, a killed app and a crashed helper. Temperature curves have been tested at moderate temperatures (the Cool curve held both fans near 3,100 rpm at 63°C) but not below the first point of a curve. Fans that macOS has stopped take about 10 to 15 seconds to spin back up when FlowGauge sets a speed. The charge limit has been tested on a real charge: set to 80% while plugged in, the battery stopped charging at 80% and held there, and charging resumed within about two minutes of turning the limit off.
 
 ## Features
 
