@@ -137,6 +137,8 @@ pub struct Settings {
     pub order: Vec<String>,
     /// Extra points of space around each menu bar item.
     pub item_spacing: f64,
+    /// Index into `BAR_UPDATE_SECONDS`: how often the menu bar's network speed changes.
+    pub bar_update: usize,
     /// Empty means ping the gateway only, so nothing leaves the local network by default.
     pub ping_host: String,
     /// Names remote addresses by asking your DNS server, so it's off until turned on.
@@ -170,6 +172,7 @@ impl Default for Settings {
             top_up: false,
             order: MODULES.iter().map(|m| m.to_string()).collect(),
             item_spacing: DEFAULT_ITEM_SPACING,
+            bar_update: DEFAULT_BAR_UPDATE,
             ping_host: String::new(),
             resolve_names: false,
             show_countries: false,
@@ -368,6 +371,20 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from)
 }
 
+/// How often the menu bar's network speed updates. Each change makes macOS redraw the item for
+/// every menu bar, which is most of FlowGauge's CPU use, so slower is lighter.
+pub const BAR_UPDATE_SECONDS: [i64; 3] = [1, 2, 5];
+pub const BAR_UPDATE_LABELS: [&str; 3] = ["Every second", "Every 2 seconds", "Every 5 seconds"];
+pub const DEFAULT_BAR_UPDATE: usize = 1;
+
+impl Settings {
+    /// Seconds between network speed updates, and between updates of the other items.
+    pub fn bar_update_seconds(&self) -> (i64, i64) {
+        let network = BAR_UPDATE_SECONDS[self.bar_update.min(BAR_UPDATE_SECONDS.len() - 1)];
+        (network, (network * 2).max(5))
+    }
+}
+
 pub fn support_dir() -> PathBuf {
     home().join("Library/Application Support/FlowGauge")
 }
@@ -547,5 +564,17 @@ mod tests {
         assert!(!move_if_new(&old, &new).unwrap(), "an existing new folder is left alone");
         assert!(!move_if_new(&base.join("missing"), &base.join("other")).unwrap());
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn slower_menu_bar_updates_slow_every_item() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.bar_update_seconds(), (2, 5));
+        settings.bar_update = 0;
+        assert_eq!(settings.bar_update_seconds(), (1, 5));
+        settings.bar_update = 2;
+        assert_eq!(settings.bar_update_seconds(), (5, 10));
+        settings.bar_update = 99;
+        assert_eq!(settings.bar_update_seconds(), (5, 10));
     }
 }

@@ -3,7 +3,7 @@
 
 use crate::view;
 use gauge_core::settings::{
-    BarStyle, FanMode, GraphScale, GraphStyle, MAX_ITEM_SPACING, MAX_PRESETS, MODULES, RANGE_LABELS, RANGES_SECONDS,
+    BAR_UPDATE_LABELS, BarStyle, FanMode, GraphScale, GraphStyle, MAX_ITEM_SPACING, MAX_PRESETS, MODULES, RANGE_LABELS, RANGES_SECONDS,
     Settings, TemperatureUnit,
 };
 use gauge_core::curve::CurvePoint;
@@ -48,6 +48,7 @@ pub const UPDATE_GEO_TAG: i64 = 100 + FIELD_UPDATE_GEO;
 const FIELD_UNIT: i64 = 1;
 const FIELD_LOGIN: i64 = 2;
 const FIELD_SPACING: i64 = 3;
+const FIELD_BAR_UPDATE: i64 = 4;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Control {
@@ -271,6 +272,16 @@ pub fn rows(page: i64, settings: &Settings) -> Vec<FormRow> {
                 control: Control::Slider { value: settings.item_spacing, min: 0.0, max: MAX_ITEM_SPACING, unit: " pt" },
                 tag: FIELD_SPACING,
             },
+            FormRow {
+                label: "Menu bar updates".into(),
+                control: Control::Segmented(BAR_UPDATE_LABELS.to_vec(), settings.bar_update.min(BAR_UPDATE_LABELS.len() - 1)),
+                tag: FIELD_BAR_UPDATE,
+            },
+            FormRow {
+                label: String::new(),
+                control: Control::Note("How often the menu bar's numbers change. Each change makes macOS redraw the menu bar, which is most of FlowGauge's CPU use, so slower is lighter."),
+                tag: -1,
+            },
         ],
         ALERTS => {
             let a = &settings.alerts;
@@ -407,6 +418,7 @@ pub fn apply(settings: &mut Settings, tag: i64, input: Input) -> bool {
         }
         (GENERAL, FIELD_LOGIN, Input::Bool(on)) => settings.launch_at_login = on,
         (GENERAL, FIELD_SPACING, Input::Number(value)) => settings.item_spacing = value.clamp(0.0, MAX_ITEM_SPACING),
+        (GENERAL, FIELD_BAR_UPDATE, Input::Index(index)) if index < BAR_UPDATE_LABELS.len() => settings.bar_update = index,
         (ALERTS, 0, Input::Bool(on)) => settings.alerts.disk_low_enabled = on,
         (ALERTS, 1, Input::Number(value)) => settings.alerts.disk_low_percent = value as f32,
         (ALERTS, 2, Input::Bool(on)) => settings.alerts.hot_enabled = on,

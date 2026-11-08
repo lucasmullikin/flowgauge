@@ -39,10 +39,6 @@ const BAR_GRAPH_SECONDS: i64 = 180;
 /// Without this window, clicking an open panel's item would close and instantly reopen it.
 /// macOS redraws a snapshot of an item for every title change, which is the app's largest idle
 /// cost. Network stays live at one second; everything else updates less often.
-const SLOW_TITLE_SECONDS: i64 = 5;
-/// Network speed changes every second, but redrawing the menu bar is most of FlowGauge's CPU,
-/// so its text updates every other second.
-const NETWORK_TITLE_SECONDS: i64 = 2;
 const ITEM_PADDING: f64 = 4.0;
 const WIDTH_STEP: f64 = 2.0;
 /// An item with no text still needs something to click.
@@ -579,7 +575,8 @@ impl Controller {
             } else {
                 view::bar_title(module.name, &latest, &settings)
             };
-            let every = if module.name == "network" { NETWORK_TITLE_SECONDS } else { SLOW_TITLE_SECONDS };
+            let (network_every, others_every) = settings.bar_update_seconds();
+            let every = if module.name == "network" { network_every } else { others_every };
             let due = now - module.last_title_at.get() >= every;
             if due && *module.title.borrow() != title {
                 module.last_title_at.set(now);
@@ -595,7 +592,7 @@ impl Controller {
                 if module.has_image.replace(false) {
                     button.setImage(None);
                 }
-            } else if now - module.last_image_at.get() >= 2 {
+            } else if now - module.last_image_at.get() >= settings.bar_update_seconds().0.max(2) {
                 module.last_image_at.set(now);
                 module.has_image.set(true);
                 button.setImage(Some(&bar_image::image(&self.bar_shares(module.name, now, &settings))));
