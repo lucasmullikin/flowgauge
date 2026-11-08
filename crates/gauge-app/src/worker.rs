@@ -36,6 +36,8 @@ const ROUTE_EVERY: u64 = 10;
 const POWER_EVERY: u64 = 2;
 const CHARGE_EVERY: u64 = 3;
 const DEVICE_BATTERY_EVERY: u64 = 30;
+/// Often enough that plugging in a phone shows up quickly.
+const USB_DEVICE_EVERY: u64 = 5;
 const FLUSH_EVERY: u64 = 60;
 const SMART_EVERY: u64 = 60;
 const SENSOR_LIST_EVERY: u64 = 3;
@@ -72,6 +74,7 @@ pub enum Update {
     Sensors(Vec<Reading>),
     Temperatures(Vec<AreaTemperature>),
     DeviceBatteries(Vec<DeviceBattery>),
+    UsbDevices(Vec<battery::UsbDevice>),
     EnergyToday(f64),
     Power(PowerSample),
     ChargeLimit(Option<Option<u8>>, Option<String>),
@@ -549,6 +552,9 @@ pub fn run(updates: Sender<Update>, shared: Arc<Shared>) {
             }
             let _ = updates.send(Update::ChargeLimit(actual, error));
         }
+        if tick.is_multiple_of(USB_DEVICE_EVERY) {
+            let _ = updates.send(Update::UsbDevices(battery::read_usb_devices()));
+        }
         if tick.is_multiple_of(DEVICE_BATTERY_EVERY) {
             let _ = updates.send(Update::DeviceBatteries(battery::read_devices()));
         }
@@ -603,6 +609,7 @@ pub fn absorb(latest: &mut crate::view::Latest, update: Update) {
         Update::Sensors(sensors) => latest.sensors = sensors,
         Update::Temperatures(areas) => latest.temperatures = areas,
         Update::DeviceBatteries(devices) => latest.device_batteries = devices,
+        Update::UsbDevices(devices) => latest.usb_devices = devices,
         Update::EnergyToday(watt_hours) => latest.energy_today_wh = watt_hours,
         Update::Power(power) => latest.power = Some(power),
         Update::ChargeLimit(actual, error) => {

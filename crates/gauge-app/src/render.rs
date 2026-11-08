@@ -469,7 +469,11 @@ fn demo_latest() -> Latest {
         fan_state: crate::fan_control::FanState::Holding,
         install_message: None,
         sensors: Vec::new(),
-        device_batteries: Vec::new(),
+        device_batteries: vec![
+            gauge_core::battery::DeviceBattery { name: "AirPods Pro".into(), percent: 80, charging: Some(true) },
+            gauge_core::battery::DeviceBattery { name: "AirPods Pro Case".into(), percent: 62, charging: Some(false) },
+        ],
+        usb_devices: vec![gauge_core::battery::UsbDevice { name: "iPhone".into(), allocated_watts: 12.0 }],
         energy_today_wh: 214.0,
         power: Some(gauge_core::battery::PowerSample {
             adapter_watts: 47.0,

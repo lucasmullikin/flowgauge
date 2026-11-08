@@ -49,6 +49,8 @@ pub struct Latest {
     pub sensors: Vec<gauge_core::sensors::Reading>,
     pub temperatures: Vec<gauge_core::sensors::AreaTemperature>,
     pub device_batteries: Vec<gauge_core::battery::DeviceBattery>,
+    /// Devices drawing power from this Mac's USB ports, like a charging iPhone.
+    pub usb_devices: Vec<gauge_core::battery::UsbDevice>,
     pub energy_today_wh: f64,
     pub power: Option<gauge_core::battery::PowerSample>,
     /// What macOS is enforcing. Outer `None` means not read yet or not understood.
@@ -61,7 +63,7 @@ pub struct Flow {
     pub adapter: f64,
     pub battery: f64,
     /// Label and watts, largest last so "Other" sits at the bottom. Zero outputs are left out.
-    pub outputs: Vec<(&'static str, f64)>,
+    pub outputs: Vec<(String, f64)>,
 }
 
 impl Flow {
@@ -82,20 +84,46 @@ pub fn power_flow(latest: &Latest) -> Option<Flow> {
     let (from_battery, into_battery) = if draining { (power.battery_watts, 0.0) } else { (0.0, power.battery_watts) };
     let adapter = if unplugged { 0.0 } else { power.adapter_watts };
     let total = adapter + from_battery;
-    let mut outputs: Vec<(&'static str, f64)> = Vec::new();
+    let mut outputs: Vec<(String, f64)> = Vec::new();
     let mut remaining = total;
     let usb = battery.and_then(|b| b.usb_out_watts).unwrap_or(0.0);
-    for (label, watts) in [("Charging", into_battery), ("Display", power.display_watts), ("USB", usb)] {
+    let usb_label = usb_label(&latest.usb_devices);
+    for (label, watts) in [("Charging", into_battery), ("Display", power.display_watts), (usb_label.as_str(), usb)] {
         let watts = watts.min(remaining);
         if watts >= FLOW_MIN_WATTS {
-            outputs.push((label, watts));
+            outputs.push((label.to_string(), watts));
             remaining -= watts;
         }
     }
     if remaining >= FLOW_MIN_WATTS {
-        outputs.push(("Other", remaining));
+        outputs.push(("Other".to_string(), remaining));
     }
     Some(Flow { adapter, battery: from_battery, outputs })
+}
+
+/// What the Mac is powering over USB: the device's name when there's one, like "iPhone".
+pub fn usb_label(devices: &[gauge_core::battery::UsbDevice]) -> String {
+    match devices {
+        [] => "USB".to_string(),
+        [one] => one.name.clone(),
+        [first, rest @ ..] => format!("{} + {}", first.name, rest.len()),
+    }
+}
+
+/// A row saying which devices charge from the Mac, and how much they're drawing.
+fn usb_row(latest: &Latest) -> Option<Row> {
+    let watts = latest.battery.as_ref().and_then(|b| b.usb_out_watts).filter(|w| *w >= FLOW_MIN_WATTS);
+    if latest.usb_devices.is_empty() && watts.is_none() {
+        return None;
+    }
+    let allowed: f64 = latest.usb_devices.iter().map(|d| d.allocated_watts).sum();
+    let value = match (watts, allowed > 0.0) {
+        (Some(w), true) => format!("{} of up to {}", format_watts(w), format_watts(allowed)),
+        (Some(w), false) => format_watts(w),
+        (None, _) => "Connected, not drawing".to_string(),
+    };
+    let label = if latest.usb_devices.is_empty() { "Powering USB devices".to_string() } else { format!("Powering {}", usb_label(&latest.usb_devices)) };
+    Some(row(label, value))
 }
 
 /// The label beside the charge limit slider.
@@ -133,7 +161,7 @@ pub fn power_summary(latest: &Latest, settings: &Settings) -> Vec<Row> {
         let health = b.health_percent.map_or_else(String::new, |h| format!(", {h:.0}% health"));
         rows.push(row("Battery", format!("{percent}%{health}")));
     }
-    if let Some(minutes) = b.minutes_to_full.filter(|_| b.charging == Some(true)) {
+    if let Some(minutes) = b.minutes_to_full.filter(|m| *m > 0 && b.charging == Some(true)) {
         rows.push(row("Time to full", format_duration(minutes)));
     }
     if let Some(minutes) = b.minutes_remaining.filter(|_| b.external_power != Some(true)) {
@@ -142,6 +170,7 @@ pub fn power_summary(latest: &Latest, settings: &Settings) -> Vec<Row> {
     if let Some(error) = &latest.charge_error {
         rows.push(row("Charge limit", error.clone()));
     }
+    rows.extend(usb_row(latest));
     rows.extend(device_rows(latest));
     let _ = settings;
     rows
@@ -152,7 +181,8 @@ fn device_rows(latest: &Latest) -> Vec<Row> {
     if !latest.device_batteries.is_empty() {
         rows.push(header("Devices"));
         for device in &latest.device_batteries {
-            rows.push(row(device.name.clone(), format!("{}%", device.percent)));
+            let state = if device.charging == Some(true) { ", charging" } else { "" };
+            rows.push(row(device.name.clone(), format!("{}%{state}", device.percent)));
         }
     }
     rows
@@ -210,6 +240,7 @@ pub fn power_cards(latest: &Latest, settings: &Settings) -> [(&'static str, Vec<
             None => adapter_rows.push(row("Status", "Not connected")),
         }
     }
+    adapter_rows.extend(usb_row(latest));
     [("Battery", now), ("Health", health), ("Power adapter", adapter_rows)]
 }
 
@@ -1171,9 +1202,26 @@ mod tests {
     }
 
     #[test]
+    fn usb_power_names_the_device_it_charges() {
+        use gauge_core::battery::UsbDevice;
+        let phone = UsbDevice { name: "iPhone".into(), allocated_watts: 12.0 };
+        let pad = UsbDevice { name: "iPad".into(), allocated_watts: 15.0 };
+        assert_eq!(usb_label(&[]), "USB");
+        assert_eq!(usb_label(&[phone.clone()]), "iPhone");
+        assert_eq!(usb_label(&[phone.clone(), pad]), "iPhone + 1");
+        let latest = Latest {
+            battery: Some(Battery { usb_out_watts: Some(1.9), ..plugged_in() }),
+            usb_devices: vec![phone],
+            ..Latest::default()
+        };
+        let row = usb_row(&latest).unwrap();
+        assert_eq!((row.key.as_str(), row.value.as_str()), ("Powering iPhone", "1.9 W of up to 12 W"));
+    }
+
+    #[test]
     fn device_batteries_appear_with_or_without_a_mac_battery() {
         let latest = Latest {
-            device_batteries: vec![gauge_core::battery::DeviceBattery { name: "Magic Mouse".into(), percent: 42 }],
+            device_batteries: vec![gauge_core::battery::DeviceBattery { name: "Magic Mouse".into(), percent: 42, charging: None }],
             ..Latest::default()
         };
         assert_eq!(value(&content("battery", &latest, &Settings::default()), "Magic Mouse"), "42%");
@@ -1223,7 +1271,7 @@ mod tests {
         let flow = power_flow(&latest).unwrap();
         assert_eq!(flow.adapter, 47.0);
         assert_eq!(flow.battery, 0.0);
-        let labels: Vec<&str> = flow.outputs.iter().map(|o| o.0).collect();
+        let labels: Vec<&str> = flow.outputs.iter().map(|o| o.0.as_str()).collect();
         assert_eq!(labels, ["Charging", "Display", "USB", "Other"]);
         let out: f64 = flow.outputs.iter().map(|o| o.1).sum();
         assert!((out - flow.total()).abs() < 0.001);
@@ -1244,7 +1292,7 @@ mod tests {
         let latest = Latest { battery: Some(battery), power: Some(sample(30.0, 20.0, 50.0, 0.0)), ..Latest::default() };
         let flow = power_flow(&latest).unwrap();
         assert_eq!((flow.adapter, flow.battery), (30.0, 20.0));
-        assert_eq!(flow.outputs, [("Other", 50.0)]);
+        assert_eq!(flow.outputs, [("Other".to_string(), 50.0)]);
     }
 
     #[test]

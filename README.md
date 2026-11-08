@@ -29,7 +29,7 @@ On that Mac, fan control has been tested with both fans moving between 2,000 and
 - **Drives:** free space, read and write speed, and NVMe health
 - **Fans:** live speed, temperature, and presets you can add, rename and delete, with fixed speeds or temperature curves
 - **Sensors:** a window listing every temperature, power, voltage and current reading. Named sensors are from community research and apply to M1 chips; the rest keep their raw codes
-- **Power:** a diagram of power flowing from the adapter and battery to the display, USB, charging and the rest of the Mac, plus a window with adapter details, battery health, and graphs
+- **Power:** a diagram of power flowing from the adapter and battery to the display, charging, devices on USB like a charging iPhone, and the rest of the Mac, plus a window with adapter details, battery health, and graphs. AirPods and other accessories that report a charge are listed too. An iPhone charging by cable doesn't share its battery level with the Mac, so that isn't shown
 - **Countries:** an optional setting that shows which country each connection goes to, using [DB-IP](https://db-ip.com)'s free country file
 - **Charge limit:** sets the limit built into macOS 27, from 80% to 100%, with Top Up to charge to full once. It doesn't need the fan helper, and FlowGauge doesn't touch battery hardware directly
 - **Graphs:** ranges from 10 minutes to All, which grows with the saved history, with line, area or bar styles

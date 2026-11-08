@@ -145,6 +145,13 @@ pub fn dict_i64(value: &CFType, key: &str) -> Option<i64> {
     as_i64(&*dict.find(CFString::new(key))?)
 }
 
+pub fn dict_bool(value: &CFType, key: &str) -> Option<bool> {
+    let dict: CFDictionary<CFString, CFType> =
+        // SAFETY: only used after confirming the value is a dictionary.
+        unsafe { CFDictionary::wrap_under_get_rule(dict_ref(value)?) };
+    as_bool(&*dict.find(CFString::new(key))?)
+}
+
 pub fn dict_string(value: &CFType, key: &str) -> Option<String> {
     let dict: CFDictionary<CFString, CFType> =
         // SAFETY: only used after confirming the value is a dictionary.

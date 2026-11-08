@@ -178,20 +178,105 @@ pub fn power_watts(voltage_mv: Option<i64>, amperage_ma: Option<i64>) -> Option<
 pub struct DeviceBattery {
     pub name: String,
     pub percent: i64,
+    pub charging: Option<bool>,
 }
 
-/// Wireless keyboards, mice and trackpads that report a charge. Headphones often don't appear
-/// here, since macOS doesn't list them in this part of the registry.
+/// A device drawing power from one of this Mac's USB ports, like a phone charging from it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct UsbDevice {
+    pub name: String,
+    /// What macOS has agreed to supply it, at 5 V.
+    pub allocated_watts: f64,
+}
+
+/// Above the 500 mA every USB device gets, so only devices that charge from the Mac count.
+const CHARGING_ALLOCATION_MA: i64 = 900;
+const USB_VOLTS: f64 = 5.0;
+
+pub fn read_usb_devices() -> Vec<UsbDevice> {
+    iokit::services_of_class("IOUSBHostDevice")
+        .iter()
+        .filter_map(|device| {
+            let milliamps = device.i64("UsbPowerSinkAllocation").filter(|ma| *ma >= CHARGING_ALLOCATION_MA)?;
+            let name = iokit::as_string(&device.property("USB Product Name")?)?;
+            Some(UsbDevice { name, allocated_watts: milliamps as f64 * USB_VOLTS / 1000.0 })
+        })
+        .collect()
+}
+
+#[link(name = "IOKit", kind = "framework")]
+unsafe extern "C" {
+    /// Not in the public headers, but exported by IOKit and used by `pmset -g accps`.
+    fn IOPSCopyPowerSourcesByType(source_type: i32) -> core_foundation_sys::base::CFTypeRef;
+    fn IOPSCopyPowerSourcesList(blob: core_foundation_sys::base::CFTypeRef) -> core_foundation_sys::array::CFArrayRef;
+    fn IOPSGetPowerSourceDescription(
+        blob: core_foundation_sys::base::CFTypeRef,
+        source: core_foundation_sys::base::CFTypeRef,
+    ) -> core_foundation_sys::dictionary::CFDictionaryRef;
+}
+
+/// Asks for accessory power sources only, like AirPods and their case.
+const ACCESSORY_SOURCES: i32 = 4;
+
+/// Accessories macOS lists as power sources, like AirPods and their case. The Mac's own
+/// battery is left out.
+fn read_accessories() -> Vec<DeviceBattery> {
+    use core_foundation::array::CFArray;
+    use core_foundation::base::{CFType, TCFType};
+    // SAFETY: the copy functions return owned objects or null, wrapped once each; descriptions
+    // are borrowed from the blob, which outlives them.
+    unsafe {
+        let blob = IOPSCopyPowerSourcesByType(ACCESSORY_SOURCES);
+        if blob.is_null() {
+            return Vec::new();
+        }
+        let blob = CFType::wrap_under_create_rule(blob);
+        let list = IOPSCopyPowerSourcesList(blob.as_CFTypeRef());
+        if list.is_null() {
+            return Vec::new();
+        }
+        let list: CFArray<CFType> = CFArray::wrap_under_create_rule(list);
+        list.iter()
+            .filter_map(|source| {
+                let description = IOPSGetPowerSourceDescription(blob.as_CFTypeRef(), source.as_CFTypeRef());
+                if description.is_null() {
+                    return None;
+                }
+                let description = CFType::wrap_under_get_rule(description.cast());
+                if iokit::dict_string(&description, "Type").as_deref() == Some("InternalBattery") {
+                    return None;
+                }
+                let current = iokit::dict_i64(&description, "Current Capacity")?;
+                let max = iokit::dict_i64(&description, "Max Capacity").filter(|m| *m > 0).unwrap_or(100);
+                Some(DeviceBattery {
+                    name: iokit::dict_string(&description, "Name")?,
+                    percent: (current * 100 / max).clamp(0, 100),
+                    charging: iokit::dict_bool(&description, "Is Charging"),
+                })
+            })
+            .collect()
+    }
+}
+
+/// Wireless keyboards, mice and trackpads that report a charge, plus accessories macOS lists as
+/// power sources, like AirPods. An iPhone charging by cable doesn't share its charge with the Mac.
 pub fn read_devices() -> Vec<DeviceBattery> {
-    iokit::services_of_class("AppleDeviceManagementHIDEventService")
+    let mut devices: Vec<DeviceBattery> = iokit::services_of_class("AppleDeviceManagementHIDEventService")
         .iter()
         .filter_map(|service| {
             Some(DeviceBattery {
                 percent: service.i64("BatteryPercent")?,
                 name: iokit::as_string(&service.property("Product")?)?,
+                charging: None,
             })
         })
-        .collect()
+        .collect();
+    for accessory in read_accessories() {
+        if !devices.iter().any(|d| d.name == accessory.name) {
+            devices.push(accessory);
+        }
+    }
+    devices
 }
 
 pub fn read() -> Option<Battery> {
@@ -338,5 +423,17 @@ mod tests {
     fn power_is_signed_by_direction() {
         assert_eq!(power_watts(Some(12000), Some(-1000)), Some(-12.0));
         assert_eq!(power_watts(Some(12000), None), None);
+    }
+
+    #[test]
+    fn usb_devices_and_accessories_read_without_failing() {
+        for device in read_usb_devices() {
+            assert!(!device.name.is_empty() && device.allocated_watts >= 4.5, "{device:?}");
+            eprintln!("usb: {} allowed {:.0} W", device.name, device.allocated_watts);
+        }
+        for device in read_devices() {
+            assert!((0..=100).contains(&device.percent), "{device:?}");
+            eprintln!("battery: {}% charging {:?}", device.percent, device.charging);
+        }
     }
 }
