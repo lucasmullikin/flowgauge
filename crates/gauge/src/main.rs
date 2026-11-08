@@ -4,7 +4,7 @@ use gauge_core::{battery, drives, gpu, memory, network, ping, processor, sensors
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "usage: gauge [all|net|apps|traffic|drives|sensors|fans|cpu|gpu|memory|battery|cost]";
+const USAGE: &str = "usage: flowgauge [all|net|apps|traffic|drives|sensors|fans|cpu|gpu|memory|battery|cost]";
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 const APP_SAMPLE_SECONDS: u32 = 1;
 const TOP_PROCESSES: usize = 5;

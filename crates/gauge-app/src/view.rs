@@ -631,7 +631,7 @@ fn first_routable(interface: &InterfaceRate) -> Option<&String> {
 const PANEL_CONNECTIONS: usize = 6;
 const CONNECTION_CHARS: usize = 34;
 
-fn shorten(text: &str, max: usize) -> String {
+pub fn shorten(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         return text.to_string();
     }

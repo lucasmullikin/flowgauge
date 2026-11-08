@@ -1,5 +1,5 @@
 //! Calm motion for the Network views: soft points of light drifting along a path. Core
-//! Animation runs it in the window server, so Gauge does no drawing per frame. Nothing moves
+//! Animation runs it in the window server, so FlowGauge does no drawing per frame. Nothing moves
 //! when Reduce Motion is on.
 
 use objc2::rc::Retained;

@@ -320,7 +320,7 @@ pub fn rows(page: i64, settings: &Settings) -> Vec<FormRow> {
                     });
                     form.push(FormRow {
                         label: String::new(),
-                        control: Control::Note("Gauge always checks your router and the DNS server macOS uses. Set an address to also ping it every 10 seconds and test the internet."),
+                        control: Control::Note("FlowGauge always checks your router and the DNS server macOS uses. Set an address to also ping it every 10 seconds and test the internet."),
                         tag: -1,
                     });
                     form.push(heading("Details"));
@@ -346,7 +346,7 @@ pub fn rows(page: i64, settings: &Settings) -> Vec<FormRow> {
                     });
                     form.push(FormRow {
                         label: String::new(),
-                        control: Control::Note("Fans return to Auto if Gauge quits or stays above 100°C."),
+                        control: Control::Note("Fans return to Auto if FlowGauge quits or stays above 100°C."),
                         tag: -1,
                     });
                 }

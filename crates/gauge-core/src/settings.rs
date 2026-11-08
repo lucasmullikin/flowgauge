@@ -364,9 +364,26 @@ pub fn make_private_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
 }
 
+fn home() -> PathBuf {
+    std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from)
+}
+
 pub fn support_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
-    home.join("Library/Application Support/Gauge")
+    home().join("Library/Application Support/FlowGauge")
+}
+
+/// The app was called Gauge before, so its folder moves across once, keeping settings and
+/// history. Does nothing when there's no old folder or the new one already exists.
+pub fn migrate_support_dir() -> std::io::Result<bool> {
+    move_if_new(&home().join("Library/Application Support/Gauge"), &support_dir())
+}
+
+fn move_if_new(old: &Path, new: &Path) -> std::io::Result<bool> {
+    if new.exists() || !old.is_dir() {
+        return Ok(false);
+    }
+    std::fs::rename(old, new)?;
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -516,5 +533,19 @@ mod tests {
         for bad in ["FF0000", "#FFF", "#GG0000", "#ééé"] {
             assert_eq!(parse_color(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn the_old_folder_moves_once_and_never_over_a_new_one() {
+        let base = std::env::temp_dir().join(format!("gauge-move-{}", std::process::id()));
+        let (old, new) = (base.join("Gauge"), base.join("FlowGauge"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("settings.json"), "{}").unwrap();
+        assert!(move_if_new(&old, &new).unwrap());
+        assert!(new.join("settings.json").exists() && !old.exists());
+        std::fs::create_dir_all(&old).unwrap();
+        assert!(!move_if_new(&old, &new).unwrap(), "an existing new folder is left alone");
+        assert!(!move_if_new(&base.join("missing"), &base.join("other")).unwrap());
+        let _ = std::fs::remove_dir_all(base);
     }
 }

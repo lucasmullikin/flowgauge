@@ -114,7 +114,7 @@ fn disk_rates(before: &[DiskActivity], after: Vec<DiskActivity>, seconds: f64) -
 
 fn notify(message: &str) {
     let _ = std::process::Command::new("/usr/bin/osascript")
-        .args(["-e", "on run argv", "-e", "display notification (item 1 of argv) with title \"Gauge\"", "-e", "end run", message])
+        .args(["-e", "on run argv", "-e", "display notification (item 1 of argv) with title \"FlowGauge\"", "-e", "end run", message])
         .spawn()
         .map(|mut child| std::thread::spawn(move || child.wait()));
 }

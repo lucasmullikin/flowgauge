@@ -214,7 +214,7 @@ impl Panel {
         root.addArrangedSubview(&details);
 
         let footer = horizontal_stack(mtm, 8.0);
-        let mut buttons = vec![("Settings…", sel!(openSettings:)), ("Quit Gauge", sel!(quit:))];
+        let mut buttons = vec![("Settings…", sel!(openSettings:)), ("Quit FlowGauge", sel!(quit:))];
         if module == "fans" {
             buttons.insert(0, ("All sensors…", sel!(openSensors:)));
         }
@@ -274,7 +274,7 @@ impl Panel {
         }
         if let Some(network) = &self.network {
             let empty = if settings.show_top_apps { "Waiting for traffic" } else { "App traffic is off in Settings" };
-            network.flow.set_flow(crate::net_view::live_flow(latest), empty);
+            network.flow.set_flow(crate::net_view::live_flow(latest, crate::net_view::PANEL), empty);
             let path = crate::net_view::path_view(latest, !settings.check_host.is_empty());
             network.message.setStringValue(&NSString::from_str(&path.message));
             network.path.set_path(path);

@@ -4,7 +4,7 @@
 use crate::graph_math::Unit;
 use crate::graph_view::{GraphData, GraphView, SeriesData};
 use crate::net_flow_view::NetFlowView;
-use crate::net_view::{self, NetFlow, TIMELINE_APPS, TIMELINE_RANGES};
+use crate::net_view::{self, APP_SORTS, NetFlow, TIMELINE_APPS, TIMELINE_RANGES, WINDOW};
 use crate::panel::{Panel, slot_color};
 use crate::path_view::PathStrip;
 use crate::timeline_view::TimelineView;
@@ -18,7 +18,7 @@ use objc2::runtime::{AnyObject, Sel};
 use objc2::{MainThreadOnly, sel};
 use objc2_app_kit::{
     NSBackingStoreType, NSBox, NSBoxType, NSColor, NSLayoutAttribute, NSSegmentSwitchTracking, NSSegmentedControl,
-    NSStackView, NSTextField, NSTitlePosition, NSView, NSWindow, NSWindowStyleMask,
+    NSStackView, NSTextField, NSTextView, NSTitlePosition, NSView, NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString};
 use std::cell::{Cell, RefCell};
@@ -33,6 +33,11 @@ const SLOW_REFRESH_SECONDS: i64 = 30;
 const CONNECTION_ROWS: usize = 10;
 const TEXT_SIZE: f64 = 12.0;
 pub const FLOW_MODES: [&str; 3] = ["Now", "Today", "7 days"];
+const FLOW_HEIGHT: f64 = 270.0;
+const LIST_WIDTH: f64 = 270.0;
+/// The app list sorts by total unless you pick another column.
+const SORT_TOTAL: usize = 0;
+const SORT_IN_OTHER: usize = 3;
 
 fn column_width() -> f64 {
     (WIDTH - MARGIN * 2.0 - COLUMN_GAP) / 2.0
@@ -98,6 +103,12 @@ pub struct NetworkWindow {
     flow_mode: Cell<usize>,
     /// Totals for Today and 7 days, worked out with the graphs since they change slowly.
     history_flows: RefCell<[Option<NetFlow>; 2]>,
+    /// Every app's download and upload for Today and 7 days.
+    history_apps: RefCell<[Vec<(String, f64, f64)>; 2]>,
+    app_sort: Cell<usize>,
+    sort_control: Retained<NSSegmentedControl>,
+    apps_list: Retained<NSTextView>,
+    last_list: RefCell<Vec<Row>>,
     range: Retained<NSSegmentedControl>,
     graph: Retained<GraphView>,
     legend: Retained<NSTextField>,
@@ -133,8 +144,32 @@ impl NetworkWindow {
         let modes = segmented(mtm, &FLOW_MODES, target, sel!(flowModeChanged:), 0);
         let full = WIDTH - MARGIN * 2.0;
         let (flow_plate, flow_stack) = card(mtm, "Flow", Some(&modes), full);
-        let flow = NetFlowView::new(mtm, full - CARD_PADDING * 2.0, 200.0);
-        flow_stack.addArrangedSubview(&flow);
+        let flow_row = horizontal_stack(mtm, COLUMN_GAP);
+        flow_row.setAlignment(NSLayoutAttribute::Top);
+        let flow = NetFlowView::new(mtm, full - CARD_PADDING * 2.0 - COLUMN_GAP - LIST_WIDTH, FLOW_HEIGHT);
+        flow.set_other_action(target, sel!(showOtherApps:));
+        flow_row.addArrangedSubview(&flow);
+        let list_column = vertical_stack(mtm, 6.0, 0.0);
+        let sort_control = segmented(mtm, &APP_SORTS, target, sel!(appSortChanged:), 0);
+        fix_width(&sort_control, LIST_WIDTH);
+        list_column.addArrangedSubview(&sort_control);
+        let scroll = NSTextView::scrollableTextView(mtm);
+        scroll.setDrawsBackground(false);
+        scroll.setHasVerticalScroller(true);
+        scroll.setTranslatesAutoresizingMaskIntoConstraints(false);
+        scroll.widthAnchor().constraintEqualToConstant(LIST_WIDTH).setActive(true);
+        scroll.heightAnchor().constraintEqualToConstant(FLOW_HEIGHT - 32.0).setActive(true);
+        let apps_list = scroll
+            .documentView()
+            .and_then(|view| view.downcast::<NSTextView>().ok())
+            .unwrap_or_else(|| NSTextView::new(mtm));
+        apps_list.setEditable(false);
+        apps_list.setSelectable(true);
+        apps_list.setDrawsBackground(false);
+        apps_list.setTextContainerInset(NSSize::new(0.0, 2.0));
+        list_column.addArrangedSubview(&scroll);
+        flow_row.addArrangedSubview(&list_column);
+        flow_stack.addArrangedSubview(&flow_row);
         root.addArrangedSubview(&flow_plate);
 
         let columns = horizontal_stack(mtm, COLUMN_GAP);
@@ -187,6 +222,11 @@ impl NetworkWindow {
             flow,
             flow_mode: Cell::new(0),
             history_flows: RefCell::new([None, None]),
+            history_apps: RefCell::new([Vec::new(), Vec::new()]),
+            app_sort: Cell::new(SORT_TOTAL),
+            sort_control,
+            apps_list,
+            last_list: RefCell::new(Vec::new()),
             range,
             graph,
             legend,
@@ -205,6 +245,16 @@ impl NetworkWindow {
         self.flow_mode.set(mode.min(FLOW_MODES.len() - 1));
     }
 
+    pub fn set_app_sort(&self, sort: usize) {
+        self.app_sort.set(sort.min(APP_SORTS.len() - 1));
+        self.sort_control.setSelectedSegment(self.app_sort.get() as isize);
+    }
+
+    /// Clicking Other in the flow lists the apps grouped inside it.
+    pub fn show_other(&self) {
+        self.set_app_sort(SORT_IN_OTHER);
+    }
+
     pub fn set_timeline_range(&self, index: usize) {
         self.timeline_range.set(index.min(TIMELINE_RANGES.len() - 1));
         self.last_slow_at.set(0);
@@ -212,9 +262,22 @@ impl NetworkWindow {
 
     pub fn refresh_text(&self, latest: &Latest, settings: &Settings) {
         let flow = match self.flow_mode.get() {
-            0 => net_view::live_flow(latest),
+            0 => net_view::live_flow(latest, WINDOW),
             mode => self.history_flows.borrow()[mode - 1].clone(),
         };
+        let apps: Vec<(String, f64, f64)> = match self.flow_mode.get() {
+            0 => latest.traffic.as_ref().map_or_else(Vec::new, |t| t.apps.iter().map(|a| (a.name.clone(), a.down, a.up)).collect()),
+            mode => self.history_apps.borrow()[mode - 1].clone(),
+        };
+        let in_flow: Vec<String> = flow.as_ref().map_or_else(Vec::new, |f| f.apps.iter().map(|a| a.label.clone()).collect());
+        let rows = net_view::app_rows(&apps, self.app_sort.get(), &in_flow, self.flow_mode.get() == 0);
+        if *self.last_list.borrow() != rows {
+            // SAFETY: the text view always has storage, and this runs on the main thread.
+            if let Some(storage) = unsafe { self.apps_list.textStorage() } {
+                storage.setAttributedString(&rows_text(&rows, LIST_WIDTH - 22.0, TEXT_SIZE));
+            }
+            *self.last_list.borrow_mut() = rows;
+        }
         let empty = if !settings.show_top_apps {
             "App traffic is off in Settings"
         } else if self.flow_mode.get() == 0 {
@@ -295,13 +358,17 @@ impl NetworkWindow {
         let resolve = settings.resolve_names;
         // Only names already looked up for live traffic, so this never sends new lookups.
         let name_of = |address| if resolve { names.cached(address) } else { None };
-        let flows = [local_midnight(now), now - 7 * 86400].map(|start| {
+        let country_of = |address| geo.and_then(|g| g.country(address)).map(|code| net_view::country_name(&code));
+        let mut flows: [Option<NetFlow>; 2] = [None, None];
+        let mut app_lists: [Vec<(String, f64, f64)>; 2] = [Vec::new(), Vec::new()];
+        for (slot, start) in [local_midnight(now), now - 7 * 86400].into_iter().enumerate() {
             let apps = history.app_totals(start).unwrap_or_default();
             let hosts = history.host_totals(start).unwrap_or_default();
-            let country_of = |address| geo.and_then(|g| g.country(address)).map(|code| net_view::country_name(&code));
-            net_view::history_flow(&source, &apps, &hosts, &name_of, &country_of)
-        });
+            flows[slot] = net_view::history_flow(&source, &apps, &hosts, &name_of, &country_of, WINDOW);
+            app_lists[slot] = apps.into_iter().map(|a| (a.app, a.bytes_in as f64, a.bytes_out as f64)).collect();
+        }
         *self.history_flows.borrow_mut() = flows;
+        *self.history_apps.borrow_mut() = app_lists;
     }
 
     pub fn moving_dots(&self) -> usize {

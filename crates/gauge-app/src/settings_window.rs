@@ -151,7 +151,7 @@ impl SettingsWindow {
             window.setReleasedWhenClosed(false);
             window
         };
-        window.setTitle(&NSString::from_str("Gauge Settings"));
+        window.setTitle(&NSString::from_str("FlowGauge Settings"));
 
         let root = vertical_stack(mtm, 0.0, 0.0);
         let top = vertical_stack(mtm, 6.0, MARGIN);

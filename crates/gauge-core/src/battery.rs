@@ -81,7 +81,7 @@ fn smart_charge_client() -> Option<objc2::rc::Retained<objc2::runtime::AnyObject
         return None;
     }
     let class = AnyClass::get(c"PowerUISmartChargeClient")?;
-    let name = objc2_foundation::NSString::from_str("Gauge");
+    let name = objc2_foundation::NSString::from_str("FlowGauge");
     // SAFETY: PowerUISmartChargeClient answers alloc and initWithClientName: with an NSString.
     unsafe {
         let allocated: Allocated<AnyObject> = msg_send![class, alloc];
@@ -139,7 +139,7 @@ pub fn read_charge_limit() -> Option<Option<u8>> {
     })
 }
 
-/// What, if anything, needs changing. `desired` of `None` means Gauge isn't managing the limit, so
+/// What, if anything, needs changing. `desired` of `None` means FlowGauge isn't managing the limit, so
 /// one set in System Settings is left alone. 100 means no limit. Top Up lifts the limit for now.
 pub fn charge_change(desired: Option<u8>, top_up: bool, actual: Option<u8>) -> Option<Option<u8>> {
     if desired.is_none() && !top_up {

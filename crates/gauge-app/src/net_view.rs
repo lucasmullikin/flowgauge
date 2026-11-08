@@ -9,8 +9,18 @@ use gauge_core::traffic::is_local;
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
 
-pub const MAX_APPS: usize = 4;
-pub const MAX_DESTINATIONS: usize = 3;
+/// How many apps and destinations a flow shows before grouping the rest as "Other".
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Limits {
+    pub apps: usize,
+    pub destinations: usize,
+}
+
+pub const PANEL: Limits = Limits { apps: 4, destinations: 3 };
+pub const WINDOW: Limits = Limits { apps: 8, destinations: 5 };
+pub const APP_SORTS: [&str; 4] = ["Total", "Down", "Up", "In Other"];
+/// Longer names are cut so they don't run into their numbers in the narrow app list.
+const LIST_NAME_CHARS: usize = 15;
 pub const TIMELINE_APPS: usize = 6;
 pub const OTHER: &str = "Other";
 pub const LOCAL: &str = "Local network";
@@ -200,7 +210,7 @@ pub fn recent_connections(traffic: &TrafficNow, limit: usize) -> Vec<(String, St
                 format_rate(d.down + d.up)
             };
             let rtt = d.rtt_ms.map(|ms| format!(", {ms:.0} ms")).unwrap_or_default();
-            (app.to_string(), place, format!("{rate}{rtt}"))
+            (display_name(app), place, format!("{rate}{rtt}"))
         })
         .collect()
 }
@@ -305,7 +315,7 @@ fn top_labels(totals: BTreeMap<String, f64>, keep: usize) -> Vec<String> {
 
 /// Keeps the busiest apps and destinations, and puts the rest in "Other". Traffic an app sent
 /// without a connection `nettop` could see also goes to "Other", so each app's paths add up.
-pub fn build_flow(source: &str, entries: &[AppEntry], live: bool) -> Option<NetFlow> {
+pub fn build_flow(source: &str, entries: &[AppEntry], live: bool, limits: Limits) -> Option<NetFlow> {
     let mut app_totals: BTreeMap<String, f64> = BTreeMap::new();
     let mut destination_totals: BTreeMap<String, f64> = BTreeMap::new();
     for entry in entries {
@@ -314,11 +324,12 @@ pub fn build_flow(source: &str, entries: &[AppEntry], live: bool) -> Option<NetF
             *destination_totals.entry(label.clone()).or_default() += down + up;
         }
     }
-    let crowded_apps = app_totals.len() > MAX_APPS;
-    let kept_apps = top_labels(app_totals, if crowded_apps { MAX_APPS - 1 } else { MAX_APPS });
+    let crowded_apps = app_totals.len() > limits.apps;
+    let kept_apps = top_labels(app_totals, if crowded_apps { limits.apps - 1 } else { limits.apps });
     destination_totals.remove(OTHER);
-    let crowded = destination_totals.len() > MAX_DESTINATIONS;
-    let kept_destinations = top_labels(destination_totals, if crowded { MAX_DESTINATIONS - 1 } else { MAX_DESTINATIONS });
+    let crowded = destination_totals.len() > limits.destinations;
+    let kept_destinations =
+        top_labels(destination_totals, if crowded { limits.destinations - 1 } else { limits.destinations });
 
     let mut apps: Vec<FlowNode> = kept_apps.iter().map(|l| FlowNode { label: l.clone(), down: 0.0, up: 0.0 }).collect();
     let mut destinations: Vec<FlowNode> =
@@ -381,14 +392,14 @@ pub fn source_label(latest: &Latest) -> String {
     }
 }
 
-pub fn live_flow(latest: &Latest) -> Option<NetFlow> {
+pub fn live_flow(latest: &Latest, limits: Limits) -> Option<NetFlow> {
     let traffic = latest.traffic.as_ref()?;
     let entries: Vec<AppEntry> = traffic
         .apps
         .iter()
         .filter(|app| app.down + app.up >= QUIET_RATE)
         .map(|app| AppEntry {
-            app: app.name.clone(),
+            app: display_name(&app.name),
             down: app.down,
             up: app.up,
             destinations: app
@@ -398,7 +409,7 @@ pub fn live_flow(latest: &Latest) -> Option<NetFlow> {
                 .collect(),
         })
         .collect();
-    build_flow(&source_label(latest), &entries, true)
+    build_flow(&source_label(latest), &entries, true, limits)
 }
 
 /// A flow of totals since some time, from saved history.
@@ -408,6 +419,7 @@ pub fn history_flow(
     hosts: &BTreeMap<(String, String), (u64, u64)>,
     name_of: &dyn Fn(IpAddr) -> Option<String>,
     country_of: &dyn Fn(IpAddr) -> Option<String>,
+    limits: Limits,
 ) -> Option<NetFlow> {
     let mut totals: BTreeMap<String, (f64, f64)> = BTreeMap::new();
     for row in apps {
@@ -427,10 +439,80 @@ pub fn history_flow(
                     Some((destination_label(&address, name.as_deref(), country.as_deref()), *d as f64, *u as f64))
                 })
                 .collect();
-            AppEntry { app, down, up, destinations }
+            AppEntry { app: display_name(&app), down, up, destinations }
         })
         .collect();
-    build_flow(source, &entries, false)
+    build_flow(source, &entries, false, limits)
+}
+
+/// Plain names for macOS's own background services, which `nettop` lists by process name.
+/// Apps keep their own names.
+pub fn display_name(raw: &str) -> String {
+    let friendly = match raw {
+        "nsurlsessiond" => "Background downloads",
+        "apsd" => "Push notifications",
+        "cloudd" => "iCloud",
+        "bird" => "iCloud Drive",
+        "cloudphotod" | "photoanalysisd" => "iCloud Photos",
+        "mDNSResponder" => "Bonjour and DNS",
+        "trustd" => "Certificate checks",
+        "softwareupdated" | "com.apple.Mobile" | "mobileassetd" => "macOS updates",
+        "remoted" | "remotepairingd" => "Paired devices",
+        "rapportd" => "Nearby Apple devices",
+        "identityservice" | "identityservicesd" | "imagent" => "iMessage and FaceTime",
+        "akd" | "accountsd" => "Apple Account",
+        "assistantd" | "siriknowledged" => "Siri",
+        "parsecd" | "corespotlightd" | "mds" => "Spotlight",
+        "symptomsd" | "networkservicep" => "Network diagnostics",
+        "configd" | "airportd" => "Network setup",
+        "timed" => "Time sync",
+        "sharingd" => "AirDrop and sharing",
+        "netbiosd" | "smbd" => "File sharing",
+        "storedownloadd" | "appstoreagent" | "appstorecompone" => "App Store",
+        "nehelper" | "neagent" | "nesessionmanage" => "VPN",
+        "kernel_task" | "launchd" => "macOS",
+        "WebKit" => "Web content",
+        "ControlCenter" => "Control Center",
+        "locationd" => "Location Services",
+        "adprivacyd" | "searchpartyd" => "Find My",
+        _ => return raw.to_string(),
+    };
+    friendly.to_string()
+}
+
+/// Every app for a period, as rows of name and traffic. `sort` indexes `APP_SORTS`: by total,
+/// by download, by upload, or only the apps grouped into the flow's "Other".
+pub fn app_rows(apps: &[(String, f64, f64)], sort: usize, in_flow: &[String], live: bool) -> Vec<crate::view::Row> {
+    let format = |value: f64| if live { format_rate(value) } else { format_bytes(value) };
+    let mut merged: BTreeMap<String, (f64, f64)> = BTreeMap::new();
+    for (name, down, up) in apps {
+        let entry = merged.entry(display_name(name)).or_default();
+        entry.0 += down;
+        entry.1 += up;
+    }
+    let mut rows: Vec<(String, f64, f64)> = merged
+        .into_iter()
+        .filter(|(_, (d, u))| d + u > 0.0)
+        .filter(|(name, _)| sort != 3 || !in_flow.contains(name))
+        .map(|(name, (d, u))| (name, d, u))
+        .collect();
+    let key = |row: &(String, f64, f64)| match sort {
+        1 => row.1,
+        2 => row.2,
+        _ => row.1 + row.2,
+    };
+    rows.sort_by(|a, b| key(b).total_cmp(&key(a)).then_with(|| a.0.cmp(&b.0)));
+    if rows.is_empty() {
+        let empty = if sort == 3 { "Every app is shown in the flow" } else { "No traffic for this period yet" };
+        return vec![crate::view::Row { key: empty.into(), value: String::new(), header: false }];
+    }
+    rows.into_iter()
+        .map(|(name, d, u)| crate::view::Row {
+            key: crate::view::shorten(&name, LIST_NAME_CHARS),
+            value: format!("↓{}  ↑{}", format(d), format(u)),
+            header: false,
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -524,6 +606,8 @@ pub fn timeline_window(now: i64, range_index: usize) -> (i64, i64, usize, &'stat
 pub fn timeline(cells: &[(i64, String, u64)], count: usize, range_label: &'static str) -> Timeline {
     let in_range = |index: i64| index >= 0 && (index as usize) < count;
     let mut totals: BTreeMap<String, f64> = BTreeMap::new();
+    let cells: Vec<(i64, String, u64)> = cells.iter().map(|(i, app, b)| (*i, display_name(app), *b)).collect();
+    let cells = cells.as_slice();
     for (index, app, bytes) in cells {
         if in_range(*index) {
             *totals.entry(app.clone()).or_default() += *bytes as f64;
@@ -570,7 +654,7 @@ mod tests {
             entry("Photos", 50.0, &[("example.info", 50.0)]),
             entry("Notes", 10.0, &[]),
         ];
-        let flow = build_flow("Wi-Fi", &entries, true).unwrap();
+        let flow = build_flow("Wi-Fi", &entries, true, PANEL).unwrap();
         let apps: Vec<&str> = flow.apps.iter().map(|a| a.label.as_str()).collect();
         assert_eq!(apps, ["Safari", "Mail", "Music", "Other"]);
         assert_eq!(flow.apps[3].down, 60.0);
@@ -583,7 +667,7 @@ mod tests {
 
     #[test]
     fn traffic_without_a_seen_connection_counts_as_other() {
-        let flow = build_flow("Wi-Fi", &[entry("Music", 100.0, &[("example.net", 40.0)])], true).unwrap();
+        let flow = build_flow("Wi-Fi", &[entry("Music", 100.0, &[("example.net", 40.0)])], true, PANEL).unwrap();
         assert_eq!(flow.destinations.len(), 2);
         assert_eq!(flow.destinations[1].label, OTHER);
         assert_eq!(flow.destinations[1].down, 60.0);
@@ -591,7 +675,7 @@ mod tests {
 
     #[test]
     fn nothing_moving_is_no_flow() {
-        assert!(build_flow("Wi-Fi", &[entry("Idle", 0.0, &[])], true).is_none());
+        assert!(build_flow("Wi-Fi", &[entry("Idle", 0.0, &[])], true, PANEL).is_none());
     }
 
     #[test]
@@ -704,5 +788,39 @@ mod tests {
         assert_eq!(view.steps[1].label, "Ethernet");
         assert_eq!(view.steps[3].value, "400 ms");
         assert_eq!(view.message, "DNS is slower than usual");
+    }
+
+    #[test]
+    fn the_window_flow_keeps_more_apps_than_the_panel() {
+        let entries: Vec<AppEntry> = (0..12).map(|i| entry(&format!("App {i}"), 100.0 + f64::from(i), &[])).collect();
+        assert_eq!(build_flow("Wi-Fi", &entries, true, PANEL).unwrap().apps.len(), PANEL.apps);
+        let window = build_flow("Wi-Fi", &entries, true, WINDOW).unwrap();
+        assert_eq!(window.apps.len(), WINDOW.apps);
+        assert_eq!(window.apps.last().unwrap().label, OTHER);
+    }
+
+    #[test]
+    fn services_get_plain_names_and_merge() {
+        assert_eq!(display_name("nsurlsessiond"), "Background downloads");
+        assert_eq!(display_name("Safari"), "Safari");
+        let rows = app_rows(
+            &[("configd".into(), 10.0, 0.0), ("airportd".into(), 5.0, 0.0), ("Mail".into(), 1.0, 100.0)],
+            0,
+            &[],
+            false,
+        );
+        assert_eq!(rows[0].key, "Mail");
+        assert_eq!(rows[1].key, "Network setup", "two services with one plain name are added together");
+        assert!(rows[1].value.starts_with("↓15 B"));
+    }
+
+    #[test]
+    fn app_rows_sort_by_column_and_filter_to_other() {
+        let apps = vec![("Big".to_string(), 900.0, 1.0), ("Sender".to_string(), 1.0, 500.0), ("Small".to_string(), 2.0, 2.0)];
+        assert_eq!(app_rows(&apps, 2, &[], true)[0].key, "Sender", "sorting by upload puts senders first");
+        assert_eq!(app_rows(&apps, 1, &[], true)[0].key, "Big");
+        let other = app_rows(&apps, 3, &["Big".into(), "Sender".into()], true);
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].key, "Small");
     }
 }

@@ -3,11 +3,11 @@
 
 use crate::flow_view::{Band, color, node, ribbon, stack};
 use crate::motion;
-use crate::net_view::NetFlow;
+use crate::net_view::{NetFlow, OTHER};
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyObject, Sel};
 use objc2::{DefinedClass, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSStringDrawing, NSView};
+use objc2_app_kit::{NSColor, NSEvent, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSStringDrawing, NSView};
 use objc2_foundation::{MainThreadMarker, NSDictionary, NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::CALayer;
 use std::cell::RefCell;
@@ -156,6 +156,8 @@ pub struct NetFlowIvars {
     dots: RefCell<Option<Retained<CALayer>>>,
     /// What the dots were last built from, so they're only rebuilt when it changes.
     built: RefCell<Vec<DotSignature>>,
+    /// Sent when the app column's "Other" is clicked.
+    other_action: RefCell<Option<(Retained<AnyObject>, Sel)>>,
 }
 
 define_class!(
@@ -170,6 +172,17 @@ define_class!(
         fn draw_rect(&self, _dirty: NSRect) {
             self.draw();
         }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            let point = self.convertPoint_fromView(event.locationInWindow(), None);
+            if self.other_app_contains(point)
+                && let Some((target, action)) = self.ivars().other_action.borrow().as_ref()
+            {
+                // SAFETY: the target was given with this action and implements it.
+                let _: () = unsafe { objc2::msg_send![&**target, performSelector: *action, withObject: self] };
+            }
+        }
     }
 );
 
@@ -181,6 +194,7 @@ impl NetFlowView {
             empty: RefCell::new("Waiting for traffic".into()),
             dots: RefCell::new(None),
             built: RefCell::new(Vec::new()),
+            other_action: RefCell::new(None),
         });
         // SAFETY: initWithFrame: is NSView's designated initializer and the ivars are set.
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
@@ -202,6 +216,27 @@ impl NetFlowView {
             self.setNeedsDisplay(true);
             self.update_dots();
         }
+    }
+
+    /// Makes the app column's "Other" clickable. The target must outlive this view.
+    pub fn set_other_action(&self, target: &AnyObject, action: Sel) {
+        // SAFETY: the target is a live object; retaining it keeps it alive while it's stored.
+        let target = unsafe { Retained::retain(target as *const AnyObject as *mut AnyObject) };
+        *self.ivars().other_action.borrow_mut() = target.map(|t| (t, action));
+    }
+
+    fn other_app_contains(&self, point: NSPoint) -> bool {
+        let flow = self.ivars().flow.borrow();
+        let Some(flow) = flow.as_ref().filter(|f| f.total() > 0.0) else { return false };
+        let size = self.bounds().size;
+        let geometry = layout(flow, size.width, size.height);
+        flow.apps.iter().zip(&geometry.apps).any(|(app, band)| {
+            app.label == OTHER
+                && point.x >= geometry.app_x
+                && point.x <= geometry.app_x + geometry.app_width
+                && point.y <= band.top
+                && point.y >= band.top - band.height
+        })
     }
 
     /// How many dots are moving, for the self-test.

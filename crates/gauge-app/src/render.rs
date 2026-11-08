@@ -50,7 +50,10 @@ fn seed(history: &mut History, now: i64, range: i64) {
 
 /// Made-up app traffic per hour for the timeline: steady browsing by day, a backup at night.
 fn seed_apps(history: &mut History, now: i64) {
-    let apps: [(&str, f64); 6] = [("Safari", 9e8), ("Mail", 2e8), ("Music", 4e8), ("Photos", 1e8), ("Notes", 3e7), ("Messages", 6e7)];
+    let apps: [(&str, f64); 9] = [
+        ("Safari", 9e8), ("Mail", 2e8), ("Music", 4e8), ("Photos", 1e8), ("Notes", 3e7), ("Messages", 6e7),
+        ("cloudd", 1.5e8), ("nsurlsessiond", 8e7), ("Podcasts", 5e7),
+    ];
     let mut noise = 777u32;
     for hours_ago in 0..(8 * 24) {
         let t = now - hours_ago * 3600;
@@ -314,6 +317,10 @@ fn demo_latest() -> Latest {
                 app("Photos", vec![place("192.168.1.40", None, 640_000.0, 1_500_000.0, 3.0)], 0.0),
                 app("Notes", vec![place("192.0.2.81", None, 180_000.0, 30_000.0, 42.0)], 0.0),
                 app("Messages", vec![place("198.51.100.77", Some("chat.example.com"), 0.0, 0.0, 51.0)], 0.0),
+                app("cloudd", vec![place("203.0.113.60", Some("sync.example.net"), 90_000.0, 420_000.0, 30.0)], 0.0),
+                app("nsurlsessiond", vec![place("203.0.113.61", Some("files.example.net"), 260_000.0, 8_000.0, 28.0)], 0.0),
+                app("Podcasts", vec![place("203.0.113.62", Some("media.example.org"), 120_000.0, 4_000.0, 40.0)], 0.0),
+                app("apsd", vec![place("203.0.113.63", Some("push.example.com"), 2_000.0, 1_000.0, 90.0)], 0.0),
             ],
         }),
         path: Some(PathNow {

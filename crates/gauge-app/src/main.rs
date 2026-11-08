@@ -1,4 +1,4 @@
-//! Gauge menu bar app.
+//! FlowGauge menu bar app.
 
 mod bar_image;
 mod controller;
@@ -60,13 +60,17 @@ fn main() {
         return;
     }
 
+    if let Err(error) = gauge_core::settings::migrate_support_dir() {
+        eprintln!("flowgauge: couldn't move the old Gauge folder: {error}");
+    }
     let directory = support_dir();
     let settings = Settings::load(&directory.join("settings.json"));
+    controller::refresh_login_agent(settings.launch_at_login);
     let history = match History::open(&directory.join("history.sqlite")) {
         Ok(history) => history,
         Err(error) => {
             // History is a convenience, so keep monitoring even if the file can't be opened.
-            eprintln!("gauge: history won't be saved: {error}");
+            eprintln!("flowgauge: history won't be saved: {error}");
             History::open_in_memory().expect("in-memory database")
         }
     };

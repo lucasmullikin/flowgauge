@@ -83,14 +83,25 @@ fn settings_path() -> std::path::PathBuf {
 
 fn login_agent_path() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME")?;
-    Some(std::path::PathBuf::from(home).join("Library/LaunchAgents/com.gauge.app.plist"))
+    Some(std::path::PathBuf::from(home).join("Library/LaunchAgents/com.flowgauge.app.plist"))
 }
 
 pub fn login_agent_plist(executable: &str) -> String {
     let escaped = executable.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
     format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>com.gauge.app</string>\n  <key>ProgramArguments</key><array><string>{escaped}</string></array>\n  <key>RunAtLoad</key><true/>\n</dict>\n</plist>\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>com.flowgauge.app</string>\n  <key>ProgramArguments</key><array><string>{escaped}</string></array>\n  <key>RunAtLoad</key><true/>\n</dict>\n</plist>\n"
     )
+}
+
+/// Removes the login item from when the app was called Gauge, and rewrites the current one so
+/// it opens this copy of the app.
+pub fn refresh_login_agent(enabled: bool) {
+    if let Some(home) = std::env::var_os("HOME") {
+        let _ = std::fs::remove_file(std::path::PathBuf::from(home).join("Library/LaunchAgents/com.gauge.app.plist"));
+    }
+    if enabled {
+        sync_login_agent(true);
+    }
 }
 
 fn sync_login_agent(enabled: bool) {
@@ -254,6 +265,22 @@ define_class!(
             self.refresh_network_window(true);
         }
 
+        #[unsafe(method(appSortChanged:))]
+        fn app_sort_changed(&self, sender: &NSSegmentedControl) {
+            if let Some(window) = &*self.ivars().network_window.borrow() {
+                window.set_app_sort(sender.selectedSegment().max(0) as usize);
+            }
+            self.refresh_network_window(true);
+        }
+
+        #[unsafe(method(showOtherApps:))]
+        fn show_other_apps(&self, _sender: &AnyObject) {
+            if let Some(window) = &*self.ivars().network_window.borrow() {
+                window.show_other();
+            }
+            self.refresh_network_window(true);
+        }
+
         #[unsafe(method(timelineRangeChanged:))]
         fn timeline_range_changed(&self, sender: &NSSegmentedControl) {
             if let Some(window) = &*self.ivars().network_window.borrow() {
@@ -329,7 +356,7 @@ impl Controller {
     }
 
     /// Closes an open panel when you click in another app or on the desktop. macOS only reports
-    /// clicks outside Gauge here, so clicking another Gauge item still switches panels.
+    /// clicks outside FlowGauge here, so clicking another FlowGauge item still switches panels.
     fn watch_outside_clicks(&self) {
         let this = self.retain();
         let handler = block2::RcBlock::new(move |_event: std::ptr::NonNull<objc2_app_kit::NSEvent>| {
@@ -1007,6 +1034,6 @@ mod tests {
     fn login_agent_escapes_the_executable_path() {
         let plist = login_agent_plist("/Apps/A&B/gauge");
         assert!(plist.contains("<string>/Apps/A&amp;B/gauge</string>"));
-        assert!(plist.contains("com.gauge.app"));
+        assert!(plist.contains("com.flowgauge.app"));
     }
 }
