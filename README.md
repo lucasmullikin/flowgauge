@@ -16,7 +16,7 @@ Tested on one machine only: an M1 Max MacBook Pro on macOS 27. Other Macs are un
 - Macs that use the lowercase `F0md` key, reportedly the M5, aren't supported.
 - Intel Macs aren't supported.
 
-On that Mac, fan control has been tested with both fans moving between 2,000 and 4,000 rpm, and with the return to Auto after a disconnect, a hang, a killed app and a crashed helper. Temperature curves have only run under heavy load, so their behavior at low temperatures hasn't been tested. The charge limit has been tested being set and cleared, with macOS's power manager (`pmset -g battlimit`) showing each change, but it hasn't yet been tested stopping a real charge.
+On that Mac, fan control has been tested with both fans moving between 2,000 and 4,000 rpm, and with the return to Auto after a disconnect, a hang, a killed app and a crashed helper. Temperature curves have only run under heavy load, so their behavior at low temperatures hasn't been tested. The charge limit has been tested on a real charge: set to 80% while plugged in, the battery stopped charging at 80% and held there, and charging resumed within about two minutes of turning the limit off.
 
 ## Features
 
