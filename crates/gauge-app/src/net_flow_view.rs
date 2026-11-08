@@ -225,6 +225,17 @@ impl NetFlowView {
         *self.ivars().other_action.borrow_mut() = target.map(|t| (t, action));
     }
 
+    /// The middle of the app column's "Other", if the flow has one, for the self-test.
+    pub fn other_app_center(&self) -> Option<NSPoint> {
+        let flow = self.ivars().flow.borrow();
+        let flow = flow.as_ref().filter(|f| f.total() > 0.0)?;
+        let size = self.bounds().size;
+        let geometry = layout(flow, size.width, size.height);
+        flow.apps.iter().zip(&geometry.apps).find(|(app, _)| app.label == OTHER).map(|(_, band)| {
+            NSPoint::new(geometry.app_x + geometry.app_width / 2.0, band.top - band.height / 2.0)
+        })
+    }
+
     fn other_app_contains(&self, point: NSPoint) -> bool {
         let flow = self.ivars().flow.borrow();
         let Some(flow) = flow.as_ref().filter(|f| f.total() > 0.0) else { return false };

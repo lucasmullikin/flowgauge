@@ -371,6 +371,26 @@ impl NetworkWindow {
         *self.history_apps.borrow_mut() = app_lists;
     }
 
+    /// Clicks the flow's "Other" the way a person would, and says whether the list switched to
+    /// the apps inside it. `None` when the flow has no Other to click.
+    pub fn click_other_for_test(&self) -> Option<bool> {
+        let point = self.flow.other_app_center()?;
+        let location = self.flow.convertPoint_toView(point, None);
+        let event = objc2_app_kit::NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+            objc2_app_kit::NSEventType::LeftMouseDown,
+            location,
+            objc2_app_kit::NSEventModifierFlags::empty(),
+            0.0,
+            self.window.windowNumber(),
+            None,
+            0,
+            1,
+            1.0,
+        )?;
+        self.flow.mouseDown(&event);
+        Some(self.app_sort.get() == SORT_IN_OTHER)
+    }
+
     pub fn moving_dots(&self) -> usize {
         self.flow.moving_dots()
     }

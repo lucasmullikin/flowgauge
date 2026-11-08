@@ -40,6 +40,9 @@ const BAR_GRAPH_SECONDS: i64 = 180;
 /// macOS redraws a snapshot of an item for every title change, which is the app's largest idle
 /// cost. Network stays live at one second; everything else updates less often.
 const SLOW_TITLE_SECONDS: i64 = 5;
+/// Network speed changes every second, but redrawing the menu bar is most of FlowGauge's CPU,
+/// so its text updates every other second.
+const NETWORK_TITLE_SECONDS: i64 = 2;
 const ITEM_PADDING: f64 = 4.0;
 const WIDTH_STEP: f64 = 2.0;
 /// An item with no text still needs something to click.
@@ -576,7 +579,8 @@ impl Controller {
             } else {
                 view::bar_title(module.name, &latest, &settings)
             };
-            let due = module.name == "network" || now - module.last_title_at.get() >= SLOW_TITLE_SECONDS;
+            let every = if module.name == "network" { NETWORK_TITLE_SECONDS } else { SLOW_TITLE_SECONDS };
+            let due = now - module.last_title_at.get() >= every;
             if due && *module.title.borrow() != title {
                 module.last_title_at.set(now);
                 button.setTitle(&NSString::from_str(&title));
@@ -962,9 +966,23 @@ impl Controller {
         check("preset choice reached settings", self.settings().active_preset == "Cool");
         check("range choice reached settings", self.settings().fans.range_index == 0);
         check("settings were saved", settings_path().exists());
-        self.spin(5.0);
+        self.spin(8.0);
         let state = self.ivars().latest.borrow().fan_state.clone();
         println!("     fan state: {}", state.label());
+        let curve_c = gauge_core::sensors::Sensors::open().ok().and_then(|sensors| {
+            gauge_core::sensors::curve_temperature(&gauge_core::sensors::temperature_areas(
+                &sensors.read_kind(gauge_core::sensors::Kind::Temperature),
+            ))
+        });
+        let fans: Vec<String> = self
+            .ivars()
+            .latest
+            .borrow()
+            .fans
+            .iter()
+            .map(|f| format!("fan {} {:.0} rpm toward {:.0} (mode {})", f.index, f.actual_rpm, f.target_rpm, f.mode))
+            .collect();
+        println!("     Cool curve at {}: {}", curve_c.map_or("no reading".into(), |c| format!("{c:.0}°C")), fans.join(", "));
         {
             let modules = self.ivars().modules.borrow();
             let module = modules.iter().find(|m| m.index == fans_index);
@@ -1003,6 +1021,29 @@ impl Controller {
         println!("     remote connections with a country: {placed} of {remote} (countries are {})", if self.settings().show_countries { "on" } else { "off" });
         let dots = self.ivars().network_window.borrow().as_ref().map_or(0, |w| w.moving_dots());
         println!("     moving dots: {dots} (none is right when idle or with Reduce Motion on)");
+        let clicked = self.ivars().network_window.borrow().as_ref().and_then(|w| w.click_other_for_test());
+        match clicked {
+            Some(listed) => check("clicking Other lists the apps inside it", listed),
+            None => println!("     no Other in the flow right now, so the click wasn't tried"),
+        }
+        // The heaviest history reads the main thread does: the 90-day timeline and the All range.
+        if let Some(window) = &*self.ivars().network_window.borrow() {
+            window.set_timeline_range(2);
+        }
+        let original_range = self.settings().network.range_index;
+        self.change_settings(|s| s.network.range_index = gauge_core::settings::RANGES_SECONDS.len() - 1);
+        let started = Instant::now();
+        self.refresh_network_window(true);
+        let window_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let started = Instant::now();
+        self.refresh_open(true);
+        let panel_ms = started.elapsed().as_secs_f64() * 1000.0;
+        self.change_settings(|s| s.network.range_index = original_range);
+        if let Some(window) = &*self.ivars().network_window.borrow() {
+            window.set_timeline_range(0);
+        }
+        println!("     main thread: Network window refresh {window_ms:.1} ms, open panel {panel_ms:.1} ms");
+        check("history refreshes stay under 50 ms", window_ms < 50.0 && panel_ms < 50.0);
         self.show_sensors();
         self.spin(4.5);
         let sensor_count = self.ivars().latest.borrow().sensors.len();

@@ -171,15 +171,37 @@ impl History {
 
     /// Writes finished minutes to disk. Call about once a minute.
     pub fn flush(&mut self, now: i64) -> rusqlite::Result<()> {
-        self.write(now - now.rem_euclid(MINUTE), now)
+        let written = self.write(now - now.rem_euclid(MINUTE));
+        self.expire(now)?;
+        written
     }
 
     /// Writes everything, including the minute in progress, for when the app is quitting.
     pub fn flush_all(&mut self, now: i64) -> rusqlite::Result<()> {
-        self.write(i64::MAX, now)
+        let written = self.write(i64::MAX);
+        self.expire(now)?;
+        written
     }
 
-    fn write(&mut self, before: i64, now: i64) -> rusqlite::Result<()> {
+    /// Deletes what's past its keeping time, at most hourly. Runs even when saving new data
+    /// failed, so old app and destination records never outstay what Settings promises.
+    fn expire(&mut self, now: i64) -> rusqlite::Result<()> {
+        if now - self.last_retention < HOUR {
+            return Ok(());
+        }
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "DELETE FROM samples WHERE tier = ?1 AND t < ?2",
+            params![TIER_MINUTE, now - MINUTE_RETENTION_SECONDS],
+        )?;
+        transaction.execute("DELETE FROM app_hours WHERE hour < ?1", params![now - APP_RETENTION_SECONDS])?;
+        transaction.execute("DELETE FROM host_hours WHERE hour < ?1", params![now - HOST_RETENTION_SECONDS])?;
+        transaction.commit()?;
+        self.last_retention = now;
+        Ok(())
+    }
+
+    fn write(&mut self, before: i64) -> rusqlite::Result<()> {
         let finished: Vec<(String, i64)> =
             self.pending.keys().filter(|(_, t)| *t < before).cloned().collect();
         let transaction = self.connection.transaction()?;
@@ -229,15 +251,6 @@ impl History {
                 let hour_t = t - t.rem_euclid(HOUR);
                 hour.execute(params![TIER_HOUR, series, hour_t, avg, f64::from(a.max), a.count])?;
             }
-        }
-        if now - self.last_retention >= HOUR {
-            transaction.execute(
-                "DELETE FROM samples WHERE tier = ?1 AND t < ?2",
-                params![TIER_MINUTE, now - MINUTE_RETENTION_SECONDS],
-            )?;
-            transaction.execute("DELETE FROM app_hours WHERE hour < ?1", params![now - APP_RETENTION_SECONDS])?;
-            transaction.execute("DELETE FROM host_hours WHERE hour < ?1", params![now - HOST_RETENTION_SECONDS])?;
-            self.last_retention = now;
         }
         transaction.commit()?;
         self.pending_totals.clear();

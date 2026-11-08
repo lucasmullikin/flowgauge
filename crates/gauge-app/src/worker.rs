@@ -29,7 +29,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const TICK: Duration = Duration::from_secs(1);
 const SYSTEM_EVERY: u64 = 2;
 const FAN_ACTIVE_EVERY: u64 = 2;
-const FAN_IDLE_EVERY: u64 = 3;
+/// Fans and the hottest sensor change slowly when nothing is being controlled or watched.
+const FAN_IDLE_EVERY: u64 = 5;
 const DRIVE_EVERY: u64 = 5;
 const WIFI_EVERY: u64 = 10;
 const ROUTE_EVERY: u64 = 10;
@@ -47,6 +48,7 @@ const PING_TIMEOUT: Duration = Duration::from_secs(2);
 const PATH_EVERY_PINGS: u64 = 2;
 const RESOLVE_EVERY_PINGS: u64 = 60;
 const DNS_SERVERS_EVERY_PINGS: u64 = 6;
+const GATEWAY_EVERY_PINGS: u64 = 6;
 const TRAFFIC_OPEN: Duration = Duration::from_secs(2);
 const TRAFFIC_CLOSED: Duration = Duration::from_secs(10);
 const GEO_RETRY: Duration = Duration::from_secs(600);
@@ -153,6 +155,8 @@ fn spawn_ping(updates: Sender<Update>, shared: Arc<Shared>) {
         let mut checked_host = String::new();
         let target = Arc::new(Mutex::new((None, None)));
         let mut servers: Vec<DnsServer> = Vec::new();
+        let mut gateway = None;
+        let mut router_failed = false;
         loop {
             std::thread::sleep(PING_INTERVAL);
             sequence = sequence.wrapping_add(1);
@@ -162,7 +166,11 @@ fn spawn_ping(updates: Sender<Update>, shared: Arc<Shared>) {
                 .lock()
                 .map(|s| (s.ping_host.clone(), s.check_host.clone()))
                 .unwrap_or_default();
-            let gateway = ping::default_gateway();
+            // The router's address rarely changes, and finding it starts a process, so it's
+            // looked up every 30 seconds, or right away if the last ping got no reply.
+            if count == 1 || count.is_multiple_of(GATEWAY_EVERY_PINGS) || router_failed {
+                gateway = ping::default_gateway();
+            }
             let ping_target = custom.parse().ok().or(gateway);
             let result = ping_target.and_then(|address| ping::ping(address, sequence, PING_TIMEOUT));
             if let (Some(ms), Ok(mut history)) = (result, shared.history.lock()) {
@@ -174,6 +182,7 @@ fn spawn_ping(updates: Sender<Update>, shared: Arc<Shared>) {
             // The router step always pings the router, even when the ping row uses another address.
             let router_result = if custom.is_empty() { result } else { gateway.and_then(|g| ping::ping(g, sequence, PING_TIMEOUT)) };
             router.push(router_result);
+            router_failed = router_result.is_none();
             if count == 1 || count.is_multiple_of(DNS_SERVERS_EVERY_PINGS) {
                 servers = dns_servers(gateway);
             }
@@ -437,7 +446,7 @@ pub fn run(updates: Sender<Update>, shared: Arc<Shared>) {
         }
 
         let controlling = driver.is_controlling() || !matches!(settings.preset().map(|p| &p.mode), None | Some(FanMode::Auto));
-        let fan_every = if controlling { FAN_ACTIVE_EVERY } else { FAN_IDLE_EVERY };
+        let fan_every = if controlling || open == fans_index { FAN_ACTIVE_EVERY } else { FAN_IDLE_EVERY };
         if let Some(sensors) = &sensors
             && tick.is_multiple_of(fan_every)
             && let Ok(fans) = sensors.fans()
@@ -502,7 +511,7 @@ pub fn run(updates: Sender<Update>, shared: Arc<Shared>) {
         }
 
         if settings.show_wifi && tick.is_multiple_of(WIFI_EVERY) {
-            let wifi = wifi::read();
+            let wifi = wifi::read(settings.show_wifi_name);
             if let Some(wifi) = &wifi
                 && let Ok(mut history) = shared.history.lock()
             {

@@ -28,7 +28,9 @@ pub fn quality_label(snr_db: i64) -> &'static str {
     }
 }
 
-pub fn read() -> Option<Wifi> {
+/// `with_name` asks for the network name too. That's slower, since macOS checks Location
+/// permission each time, so it's skipped unless the name is shown.
+pub fn read(with_name: bool) -> Option<Wifi> {
     // SAFETY: documented CoreWLAN getters on objects retained for the duration of the calls.
     unsafe {
         let client = CWWiFiClient::sharedWiFiClient();
@@ -40,7 +42,7 @@ pub fn read() -> Option<Wifi> {
         }
         Some(Wifi {
             interface: interface.interfaceName().map(|n| n.to_string()),
-            ssid: interface.ssid().map(|s| s.to_string()),
+            ssid: if with_name { interface.ssid().map(|s| s.to_string()) } else { None },
             rssi_dbm,
             noise_dbm: interface.noiseMeasurement() as i64,
             transmit_mbps: interface.transmitRate(),

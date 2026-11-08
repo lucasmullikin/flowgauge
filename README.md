@@ -18,7 +18,7 @@ Tested on one machine only: an M1 Max MacBook Pro on macOS 27. Other Macs are un
 - Macs that use the lowercase `F0md` key, reportedly the M5, aren't supported.
 - Intel Macs aren't supported.
 
-On that Mac, fan control has been tested with both fans moving between 2,000 and 4,000 rpm, and with the return to Auto after a disconnect, a hang, a killed app and a crashed helper. Temperature curves have only run under heavy load, so their behavior at low temperatures hasn't been tested. The charge limit has been tested on a real charge: set to 80% while plugged in, the battery stopped charging at 80% and held there, and charging resumed within about two minutes of turning the limit off.
+On that Mac, fan control has been tested with both fans moving between 2,000 and 4,000 rpm, and with the return to Auto after a disconnect, a hang, a killed app and a crashed helper. Temperature curves have been tested at moderate temperatures (the Cool curve held both fans near 3,100 rpm at 63°C) but not below the first point of a curve. Fans that macOS has stopped take about 10 to 15 seconds to spin back up when FlowGauge sets a speed. The charge limit has been tested on a real charge: set to 80% while plugged in, the battery stopped charging at 80% and held there, and charging resumed within about two minutes of turning the limit off.
 
 ## Features
 

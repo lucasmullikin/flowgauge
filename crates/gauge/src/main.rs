@@ -146,7 +146,7 @@ fn cost() -> Result<Value, String> {
     measure("hottest", 3.0, &mut || { sensors.hottest(); });
     measure("drive_activity", 5.0, &mut || { drives::read_activity(); });
     measure("volumes", 5.0, &mut || { drives::read_volumes(); });
-    measure("wifi", 10.0, &mut || { wifi::read(); });
+    measure("wifi", 10.0, &mut || { wifi::read(false); });
     measure("battery", 30.0, &mut || { battery::read(); });
     Ok(Value::Array(rows))
 }
