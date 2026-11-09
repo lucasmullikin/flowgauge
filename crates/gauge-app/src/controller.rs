@@ -107,11 +107,19 @@ fn sync_login_agent(enabled: bool) {
     let Some(path) = login_agent_path() else { return };
     if enabled {
         if let Ok(executable) = std::env::current_exe() {
-            let _ = std::fs::write(path, login_agent_plist(&executable.to_string_lossy()));
+            let _ = write_login_agent(&path, &executable.to_string_lossy());
         }
     } else {
         let _ = std::fs::remove_file(path);
     }
+}
+
+/// `~/Library/LaunchAgents` doesn't exist on every Mac, so make it before writing into it.
+fn write_login_agent(path: &std::path::Path, executable: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, login_agent_plist(executable))
 }
 
 /// Items hug their text, with the spacing setting as the only extra room. Rounded up a little
@@ -1073,5 +1081,16 @@ mod tests {
         let plist = login_agent_plist("/Apps/A&B/gauge");
         assert!(plist.contains("<string>/Apps/A&amp;B/gauge</string>"));
         assert!(plist.contains("com.flowgauge.app"));
+    }
+
+    #[test]
+    fn login_agent_is_written_when_its_folder_is_missing() {
+        let root = std::env::temp_dir().join(format!("flowgauge-login-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let path = root.join("Library/LaunchAgents/com.flowgauge.app.plist");
+        write_login_agent(&path, "/Apps/FlowGauge.app/Contents/MacOS/gauge-app").unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("<string>/Apps/FlowGauge.app/Contents/MacOS/gauge-app</string>"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
