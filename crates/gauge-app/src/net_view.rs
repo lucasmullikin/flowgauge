@@ -589,6 +589,17 @@ pub struct Timeline {
     pub range_label: &'static str,
 }
 
+/// Where the graph above the flow starts for each flow mode: the last 10 minutes for Now, local
+/// midnight for Today, and midnight six days ago for 7 days, so the graph covers the same days
+/// as the saved daily totals.
+pub fn flow_history_start(now: i64, mode: usize) -> i64 {
+    match mode {
+        0 => now - 600,
+        1 => gauge_core::history::local_midnight(now),
+        _ => gauge_core::history::local_midnight(now - 6 * 86400),
+    }
+}
+
 /// Where a timeline starts, how long each cell is, and how many there are. The last cell
 /// holds now, and day cells start at local midnight.
 pub fn timeline_window(now: i64, range_index: usize) -> (i64, i64, usize, &'static str) {
@@ -702,6 +713,16 @@ mod tests {
         assert_eq!(got.rows.last().unwrap().0, OTHER);
         assert_eq!(got.rows.last().unwrap().1[23], 600.0, "App 0, 1 and 2 are summed");
         assert_eq!(got.busiest, Some(("App 7".into(), 850.0)), "cells outside the range don't count");
+    }
+
+    #[test]
+    fn flow_history_starts_where_each_mode_counts_from() {
+        let now = 1_800_000_000;
+        let midnight = gauge_core::history::local_midnight(now);
+        assert_eq!(flow_history_start(now, 0), now - 600);
+        assert_eq!(flow_history_start(now, 1), midnight);
+        assert_eq!(flow_history_start(now, 2), gauge_core::history::local_midnight(now - 6 * 86400));
+        assert_eq!(gauge_core::history::local_day(flow_history_start(now, 2), 0), gauge_core::history::local_day(now, 6));
     }
 
     #[test]

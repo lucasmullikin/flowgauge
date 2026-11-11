@@ -1,4 +1,4 @@
-//! The full Network window: the flow on top, then speed and the app timeline beside the path
+//! The full Network window: how much came in over time and the flow on top, then speed and the app timeline beside the path
 //! check and the busiest connections.
 
 use crate::graph_math::Unit;
@@ -10,7 +10,7 @@ use crate::path_view::PathStrip;
 use crate::timeline_view::TimelineView;
 use crate::ui::{fix_width, horizontal_stack, label, legend_text, rows_text, vertical_stack};
 use crate::view::{Latest, Row, Slot, format_rate};
-use gauge_core::history::{History, bridge_gaps, bucketize, local_midnight};
+use gauge_core::history::{History, bridge_gaps, bucketize, local_day, local_midnight};
 use gauge_core::names::Names;
 use gauge_core::settings::{ALL_HISTORY, RANGE_LABELS, Settings};
 use objc2::rc::Retained;
@@ -34,6 +34,8 @@ const CONNECTION_ROWS: usize = 10;
 const TEXT_SIZE: f64 = 12.0;
 pub const FLOW_MODES: [&str; 3] = ["Now", "Today", "7 days"];
 const FLOW_HEIGHT: f64 = 270.0;
+const HISTORY_HEIGHT: f64 = 90.0;
+const HISTORY_POINTS: usize = 240;
 const LIST_WIDTH: f64 = 270.0;
 /// The app list sorts by total unless you pick another column.
 const SORT_TOTAL: usize = 0;
@@ -101,6 +103,10 @@ pub struct NetworkWindow {
     pub window: Retained<NSWindow>,
     flow: Retained<NetFlowView>,
     flow_mode: Cell<usize>,
+    /// Download and upload over the flow mode's period, above the flow.
+    history_graph: Retained<GraphView>,
+    history_legend: Retained<NSTextField>,
+    last_history_at: Cell<i64>,
     /// Totals for Today and 7 days, worked out with the graphs since they change slowly.
     history_flows: RefCell<[Option<NetFlow>; 2]>,
     /// Every app's download and upload for Today and 7 days.
@@ -144,6 +150,11 @@ impl NetworkWindow {
         let modes = segmented(mtm, &FLOW_MODES, target, sel!(flowModeChanged:), 0);
         let full = WIDTH - MARGIN * 2.0;
         let (flow_plate, flow_stack) = card(mtm, "Flow", Some(&modes), full);
+        let history_graph = GraphView::new(mtm, full - CARD_PADDING * 2.0, HISTORY_HEIGHT);
+        flow_stack.addArrangedSubview(&history_graph);
+        let history_legend = label(mtm, "", TEXT_SIZE, false);
+        fix_width(&history_legend, full - CARD_PADDING * 2.0);
+        flow_stack.addArrangedSubview(&history_legend);
         let flow_row = horizontal_stack(mtm, COLUMN_GAP);
         flow_row.setAlignment(NSLayoutAttribute::Top);
         let flow = NetFlowView::new(mtm, full - CARD_PADDING * 2.0 - COLUMN_GAP - LIST_WIDTH, FLOW_HEIGHT);
@@ -221,6 +232,9 @@ impl NetworkWindow {
             window,
             flow,
             flow_mode: Cell::new(0),
+            history_graph,
+            history_legend,
+            last_history_at: Cell::new(0),
             history_flows: RefCell::new([None, None]),
             history_apps: RefCell::new([Vec::new(), Vec::new()]),
             app_sort: Cell::new(SORT_TOTAL),
@@ -243,6 +257,7 @@ impl NetworkWindow {
 
     pub fn set_flow_mode(&self, mode: usize) {
         self.flow_mode.set(mode.min(FLOW_MODES.len() - 1));
+        self.last_history_at.set(0);
     }
 
     pub fn set_app_sort(&self, sort: usize) {
@@ -299,6 +314,47 @@ impl NetworkWindow {
                 (format!("Up {}", format_rate(default.out_per_sec)), slot_color(module, Slot::Secondary)),
             ];
             self.legend.setAttributedStringValue(&legend_text(&entries, TEXT_SIZE));
+            if self.flow_mode.get() == 0 {
+                self.history_legend.setAttributedStringValue(&legend_text(&entries, TEXT_SIZE));
+            }
+        }
+    }
+
+    /// Download and upload since the flow mode's start, with the period's totals under it.
+    fn refresh_history(&self, history: &History, module: &gauge_core::settings::ModuleSettings, now: i64) {
+        let mode = self.flow_mode.get();
+        let due = if mode == 0 { 1 } else { SLOW_REFRESH_SECONDS };
+        if now - self.last_history_at.get() < due {
+            return;
+        }
+        self.last_history_at.set(now);
+        let start = net_view::flow_history_start(now, mode);
+        let range = (now - start).max(60);
+        let series = [("net.down", Slot::Primary), ("net.up", Slot::Secondary)]
+            .into_iter()
+            .map(|(id, slot)| {
+                let rows = history.rows(id, range, now).unwrap_or_default();
+                let mut buckets = bucketize(&rows, now - range, now, HISTORY_POINTS);
+                bridge_gaps(&mut buckets, range as f64 / HISTORY_POINTS as f64, MAX_BRIDGED_GAP_SECONDS);
+                SeriesData { color: slot_color(module, slot), buckets }
+            })
+            .collect();
+        self.history_graph.set_data(GraphData {
+            series,
+            style: module.graph_style,
+            scale: module.graph_scale,
+            show_peaks: module.show_peaks,
+            unit: Unit::Rate,
+            range_seconds: range,
+        });
+        if mode != 0 {
+            let (down, up) = history.totals_since(&local_day(start, 0)).unwrap_or_default();
+            let period = if mode == 1 { "today" } else { "in 7 days" };
+            let entries = vec![
+                (format!("Down {} {period}", crate::view::format_bytes(down as f64)), slot_color(module, Slot::Primary)),
+                (format!("Up {} {period}", crate::view::format_bytes(up as f64)), slot_color(module, Slot::Secondary)),
+            ];
+            self.history_legend.setAttributedStringValue(&legend_text(&entries, TEXT_SIZE));
         }
     }
 
@@ -314,6 +370,10 @@ impl NetworkWindow {
         force: bool,
     ) {
         let module = &settings.network;
+        if force {
+            self.last_history_at.set(0);
+        }
+        self.refresh_history(history, module, now);
         let selected = Panel::range_seconds(module);
         let range = match selected {
             ALL_HISTORY => history.first_time().ok().flatten().map_or(60, |t| (now - t).max(60)),
