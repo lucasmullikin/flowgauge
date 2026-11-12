@@ -139,7 +139,7 @@ impl Panel {
 
         let is_power = module == "battery";
         let is_network = module == "network";
-        // These panels lead with a flow diagram; their graphs are in their windows.
+        // These panels lead with a flow diagram, so their range buttons and graph come after it.
         let has_flow = is_power || is_network;
         let range = segmented(mtm, &RANGE_LABELS, target, sel!(rangeChanged:), index as isize);
         if !has_flow {
@@ -179,7 +179,10 @@ impl Panel {
             ChargeControls { flow, limit_label, slider, top_up }
         });
 
-        let specs = if has_flow { Vec::new() } else { view::graphs(module, settings) };
+        if has_flow {
+            root.addArrangedSubview(&range);
+        }
+        let specs = view::graphs(module, settings);
         let graphs: Vec<(Retained<GraphView>, GraphSpec)> = specs
             .into_iter()
             .map(|spec| {
@@ -188,7 +191,7 @@ impl Panel {
                     name.setTextColor(Some(&objc2_app_kit::NSColor::secondaryLabelColor()));
                     root.addArrangedSubview(&name);
                 }
-                let graph = GraphView::new(mtm, CONTENT_WIDTH, spec.height);
+                let graph = GraphView::new(mtm, width, spec.height);
                 root.addArrangedSubview(&graph);
                 (graph, spec)
             })
@@ -196,16 +199,12 @@ impl Panel {
 
         let since = label(mtm, "", 11.0, false);
         since.setTextColor(Some(&objc2_app_kit::NSColor::secondaryLabelColor()));
-        fix_width(&since, CONTENT_WIDTH);
-        if !has_flow {
-            root.addArrangedSubview(&since);
-        }
+        fix_width(&since, width);
+        root.addArrangedSubview(&since);
 
         let legend = label(mtm, "", TEXT_SIZE, false);
         fix_width(&legend, width);
-        if !has_flow {
-            root.addArrangedSubview(&legend);
-        }
+        root.addArrangedSubview(&legend);
 
         let details = NSTextField::wrappingLabelWithString(&NSString::from_str(""), mtm);
         details.setSelectable(false);

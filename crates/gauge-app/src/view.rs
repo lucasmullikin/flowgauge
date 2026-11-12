@@ -912,7 +912,10 @@ fn power_content(latest: &Latest, settings: &Settings) -> Content {
     Content {
         title: "Power".into(),
         subtitle: power_state(b).to_string(),
-        legend: Vec::new(),
+        legend: match latest.power {
+            Some(p) => vec![format!("Using {}", format_watts(p.system_watts)), format!("In {}", format_watts(p.adapter_watts))],
+            None => vec!["Using".into(), "In".into()],
+        },
         rows: power_summary(latest, settings),
     }
 }
@@ -1320,6 +1323,14 @@ mod tests {
         assert_eq!(value(&got, "96W USB-C Power Adapter"), "50% of its limit");
         assert_eq!(value(&got, "Battery"), "80%, 84% health");
         assert_eq!(value(&got, "Time to full"), "1h 15m");
+    }
+
+    #[test]
+    fn power_legend_names_the_graph_lines() {
+        let latest = Latest { battery: Some(plugged_in()), power: Some(sample(47.0, 19.0, 30.0, 3.0)), ..Latest::default() };
+        assert_eq!(content("battery", &latest, &Settings::default()).legend, vec!["Using 30 W", "In 47 W"]);
+        let waiting = Latest { battery: Some(plugged_in()), ..Latest::default() };
+        assert_eq!(content("battery", &waiting, &Settings::default()).legend, vec!["Using", "In"]);
     }
 
     #[test]
