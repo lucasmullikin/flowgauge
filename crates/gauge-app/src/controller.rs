@@ -688,6 +688,7 @@ impl Controller {
         let Some(module) = modules.iter().find(|m| m.index == index) else { return };
         self.ivars().shared.open_module.store(index, Ordering::Relaxed);
         let settings = self.settings();
+        module.panel.set_transparency(&settings);
         module.panel.refresh_text(&self.ivars().latest.borrow(), &settings);
         if let Ok(history) = self.ivars().shared.history.lock() {
             module.panel.refresh_graphs(&history, &settings, now_seconds(), true);
@@ -845,6 +846,11 @@ impl Controller {
         }
         if before.launch_at_login != after.launch_at_login {
             sync_login_agent(after.launch_at_login);
+        }
+        if before.panel_transparency != after.panel_transparency {
+            for module in self.ivars().modules.borrow().iter() {
+                module.panel.set_transparency(&after);
+            }
         }
         let layout = |s: &Settings| {
             (

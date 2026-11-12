@@ -10,8 +10,8 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::sel;
 use objc2_app_kit::{
-    NSButton, NSPopover, NSPopoverBehavior, NSSegmentSwitchTracking, NSSegmentedControl, NSSlider,
-    NSStackView, NSTextField, NSView, NSViewController,
+    NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSBox, NSBoxType, NSButton, NSColor, NSPopover, NSPopoverBehavior, NSSegmentSwitchTracking, NSSegmentedControl,
+    NSSlider, NSStackView, NSTextField, NSTitlePosition, NSView, NSViewController, NSWindowOrderingMode,
 };
 use objc2_foundation::{MainThreadMarker, NSArray, NSString};
 use std::cell::{Cell, RefCell};
@@ -81,6 +81,8 @@ pub struct Panel {
     pub module: &'static str,
     pub popover: Retained<NSPopover>,
     pub root: Retained<NSStackView>,
+    /// Sits behind the content; its fill sets how see-through the panel is.
+    backdrop: Retained<NSBox>,
     title: Retained<NSTextField>,
     subtitle: Retained<NSTextField>,
     range: Retained<NSSegmentedControl>,
@@ -232,6 +234,23 @@ impl Panel {
         }
         root.addArrangedSubview(&footer);
 
+        // Behind the stack's arranged views and pinned to its edges; the stack doesn't lay it out.
+        let backdrop = NSBox::new(mtm);
+        backdrop.setBoxType(NSBoxType::Custom);
+        backdrop.setTitlePosition(NSTitlePosition::NoTitle);
+        backdrop.setBorderWidth(0.0);
+        backdrop.setCornerRadius(0.0);
+        backdrop.setTranslatesAutoresizingMaskIntoConstraints(false);
+        root.addSubview_positioned_relativeTo(&backdrop, NSWindowOrderingMode::Below, None);
+        for (edge, root_edge) in [
+            (backdrop.leadingAnchor(), root.leadingAnchor()),
+            (backdrop.trailingAnchor(), root.trailingAnchor()),
+        ] {
+            edge.constraintEqualToAnchor(&root_edge).setActive(true);
+        }
+        for (edge, root_edge) in [(backdrop.topAnchor(), root.topAnchor()), (backdrop.bottomAnchor(), root.bottomAnchor())] {
+            edge.constraintEqualToAnchor(&root_edge).setActive(true);
+        }
         let controller = NSViewController::new(mtm);
         controller.setView(&root);
         let popover = NSPopover::new(mtm);
@@ -239,10 +258,11 @@ impl Panel {
         popover.setAnimates(false);
         popover.setContentViewController(Some(&controller));
 
-        Panel {
+        let panel = Panel {
             module,
             popover,
             root,
+            backdrop,
             title,
             subtitle,
             range,
@@ -255,7 +275,9 @@ impl Panel {
             network,
             last_content: RefCell::new(Content::default()),
             last_graph_at: Cell::new(0),
-        }
+        };
+        panel.set_transparency(settings);
+        panel
     }
 
     fn settings_for<'a>(&self, settings: &'a Settings) -> Option<&'a ModuleSettings> {
@@ -326,6 +348,14 @@ impl Panel {
         if changed {
             self.fit();
         }
+    }
+
+    /// Sets the backdrop from the setting and the panel's current light or dark look. Called
+    /// again each time the panel opens, since a fixed color doesn't follow a switch between them.
+    pub fn set_transparency(&self, settings: &Settings) {
+        let shade = if is_dark(&self.root) { 0.16 } else { 0.93 };
+        let fill = NSColor::colorWithSRGBRed_green_blue_alpha(shade, shade, shade, settings.panel_backdrop_alpha());
+        self.backdrop.setFillColor(&fill);
     }
 
     pub fn fit(&self) {
@@ -416,4 +446,11 @@ impl Panel {
     pub fn root_view(&self) -> &NSView {
         &self.root
     }
+}
+
+fn is_dark(view: &NSView) -> bool {
+    // SAFETY: the appearance name statics are valid for the process's lifetime.
+    let (dark, light) = unsafe { (NSAppearanceNameDarkAqua, NSAppearanceNameAqua) };
+    let names = NSArray::from_slice(&[dark, light]);
+    view.effectiveAppearance().bestMatchFromAppearancesWithNames(&names).is_some_and(|name| &*name == dark)
 }

@@ -49,6 +49,7 @@ const FIELD_UNIT: i64 = 1;
 const FIELD_LOGIN: i64 = 2;
 const FIELD_SPACING: i64 = 3;
 const FIELD_BAR_UPDATE: i64 = 4;
+const FIELD_TRANSPARENCY: i64 = 5;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Control {
@@ -282,6 +283,16 @@ pub fn rows(page: i64, settings: &Settings) -> Vec<FormRow> {
                 control: Control::Note("How often the menu bar's numbers change. Each change makes macOS redraw the menu bar, which is most of FlowGauge's CPU use, so slower is lighter."),
                 tag: -1,
             },
+            FormRow {
+                label: "Panel transparency".into(),
+                control: Control::Slider { value: settings.panel_transparency, min: 0.0, max: 100.0, unit: "%" },
+                tag: FIELD_TRANSPARENCY,
+            },
+            FormRow {
+                label: String::new(),
+                control: Control::Note("How much shows through the panels that open when you click an item. 100% is the standard macOS look; 0% is solid."),
+                tag: -1,
+            },
         ],
         ALERTS => {
             let a = &settings.alerts;
@@ -419,6 +430,7 @@ pub fn apply(settings: &mut Settings, tag: i64, input: Input) -> bool {
         (GENERAL, FIELD_LOGIN, Input::Bool(on)) => settings.launch_at_login = on,
         (GENERAL, FIELD_SPACING, Input::Number(value)) => settings.item_spacing = value.clamp(0.0, MAX_ITEM_SPACING),
         (GENERAL, FIELD_BAR_UPDATE, Input::Index(index)) if index < BAR_UPDATE_LABELS.len() => settings.bar_update = index,
+        (GENERAL, FIELD_TRANSPARENCY, Input::Number(value)) => settings.panel_transparency = value.clamp(0.0, 100.0),
         (ALERTS, 0, Input::Bool(on)) => settings.alerts.disk_low_enabled = on,
         (ALERTS, 1, Input::Number(value)) => settings.alerts.disk_low_percent = value as f32,
         (ALERTS, 2, Input::Bool(on)) => settings.alerts.hot_enabled = on,
@@ -623,6 +635,18 @@ mod tests {
         assert!(form.iter().any(|r| r.label == "Cool"));
         assert!(form.iter().any(|r| matches!(r.control, Control::Curve(_))));
         assert!(form.iter().any(|r| r.control == Control::Button("Add preset")));
+    }
+
+    #[test]
+    fn panel_transparency_is_a_general_slider_and_is_clamped() {
+        let form = rows(GENERAL, &Settings::default());
+        let row = form.iter().find(|r| r.label == "Panel transparency").expect("no transparency row");
+        assert_eq!(row.control, Control::Slider { value: 100.0, min: 0.0, max: 100.0, unit: "%" });
+        let mut settings = Settings::default();
+        assert!(apply(&mut settings, row.tag, Input::Number(35.0)));
+        assert_eq!(settings.panel_transparency, 35.0);
+        apply(&mut settings, row.tag, Input::Number(-10.0));
+        assert_eq!(settings.panel_transparency, 0.0);
     }
 
     #[test]

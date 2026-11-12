@@ -139,6 +139,9 @@ pub struct Settings {
     pub item_spacing: f64,
     /// Index into `BAR_UPDATE_SECONDS`: how often the menu bar's network speed changes.
     pub bar_update: usize,
+    /// How see-through the click panels are, in percent. 100 is macOS's own glass; lower adds
+    /// a solid background behind the panel, and 0 is fully solid.
+    pub panel_transparency: f64,
     /// Empty means ping the gateway only, so nothing leaves the local network by default.
     pub ping_host: String,
     /// Names remote addresses by asking your DNS server, so it's off until turned on.
@@ -173,6 +176,7 @@ impl Default for Settings {
             order: MODULES.iter().map(|m| m.to_string()).collect(),
             item_spacing: DEFAULT_ITEM_SPACING,
             bar_update: DEFAULT_BAR_UPDATE,
+            panel_transparency: 100.0,
             ping_host: String::new(),
             resolve_names: false,
             show_countries: false,
@@ -329,6 +333,11 @@ impl Settings {
 
     /// Fans start on Auto every launch unless a preset is chosen again, so a bad curve can't
     /// come back by itself after a restart.
+    /// How opaque the solid background behind a click panel is, from 0 to 1.
+    pub fn panel_backdrop_alpha(&self) -> f64 {
+        1.0 - self.panel_transparency.clamp(0.0, 100.0) / 100.0
+    }
+
     pub fn load(path: &Path) -> Settings {
         let mut settings: Settings = std::fs::read_to_string(path)
             .ok()
@@ -337,6 +346,7 @@ impl Settings {
         "Auto".clone_into(&mut settings.active_preset);
         settings.order = normalized_order(&settings.order);
         settings.item_spacing = settings.item_spacing.clamp(0.0, MAX_ITEM_SPACING);
+        settings.panel_transparency = settings.panel_transparency.clamp(0.0, 100.0);
         settings.normalize_presets();
         settings.charge_limit = settings.charge_limit.map(|limit| limit.clamp(crate::battery::MIN_CHARGE_LIMIT, 100));
         for name in MODULES {
@@ -530,6 +540,26 @@ mod tests {
         assert!(settings.rename_preset(cool, " Night "));
         assert_eq!(settings.presets[cool].name, "Night");
         assert_eq!(settings.active_preset, "Night");
+    }
+
+    #[test]
+    fn panels_start_fully_see_through_and_solid_is_zero() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.panel_transparency, 100.0);
+        assert_eq!(settings.panel_backdrop_alpha(), 0.0);
+        settings.panel_transparency = 0.0;
+        assert_eq!(settings.panel_backdrop_alpha(), 1.0);
+        settings.panel_transparency = 40.0;
+        assert!((settings.panel_backdrop_alpha() - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn panel_transparency_from_a_file_is_clamped() {
+        let path = temp_file("transparency");
+        std::fs::write(&path, r#"{"panel_transparency": 250}"#).unwrap();
+        assert_eq!(Settings::load(&path).panel_transparency, 100.0);
+        std::fs::write(&path, r#"{"panel_transparency": -5}"#).unwrap();
+        assert_eq!(Settings::load(&path).panel_transparency, 0.0);
     }
 
     #[test]

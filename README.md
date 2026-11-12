@@ -35,6 +35,7 @@ On the MacBook Pro, fan control has been tested with both fans moving between 2,
 - **Countries:** an optional setting that shows which country each connection goes to, using [DB-IP](https://db-ip.com)'s free country file
 - **Charge limit:** sets the limit built into macOS 27, from 80% to 100%, with Top Up to charge to full once. It doesn't need the fan helper, and FlowGauge doesn't touch battery hardware directly
 - **Graphs:** ranges from 10 minutes to All, which grows with the saved history, with line, area or bar styles
+- **Panels:** set how see-through the panels are, from the standard macOS look to solid
 - **Menu bar:** edit what each item says, add icons, adjust the spacing, drag items into any order, and choose how often the numbers change. Every 2 seconds is the default; every 5 seconds keeps FlowGauge under 1% of one CPU core
 - **Alerts:** low disk space, high temperature, memory pressure and lost connection
 - **Command line:** `flowgauge` prints every reading as JSON
