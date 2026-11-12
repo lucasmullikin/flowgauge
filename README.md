@@ -24,14 +24,14 @@ On the MacBook Pro, fan control has been tested with both fans moving between 2,
 
 ## Features
 
-- **Network:** a flow diagram from your connection to apps to where their traffic goes, with soft points of light drifting along it while data moves. Also live speed, data used today and this month, Wi-Fi signal, the DNS server in use, recent connections, and a check of each step to the internet. The menu bar item keeps a steady width so the items beside it don't shift
-- **Network window:** the flow now, today or over 7 days, speed history, which apps used the network hour by hour for up to 90 days, path health with the DNS server in use, and recent connections, which stay listed for a minute after they go quiet
+- **Network:** a flow diagram from your connection to apps to where their traffic goes, with soft points of light drifting along it while data moves. Also live speed with a history graph of download and upload, data used today and this month, Wi-Fi signal, the DNS server in use, recent connections, and a check of each step to the internet. The menu bar item keeps a steady width so the items beside it don't shift
+- **Network window:** a graph of how much came in and went out, above the flow, for now, today or the last 7 days, with that period's totals. Also speed history, which apps used the network hour by hour for up to 90 days, path health with the DNS server in use, and recent connections, which stay listed for a minute after they go quiet
 - **Memory:** pressure, app, wired, compressed, cached, swap, and top apps
 - **CPU and GPU:** total and per-core load, load average, GPU use, and top apps
 - **Drives:** free space, read and write speed, and NVMe health
 - **Fans:** live speed, temperature, and presets you can add, rename and delete, with fixed speeds or temperature curves
 - **Sensors:** a window listing every temperature, power, voltage and current reading. Named sensors are from community research and apply to M1 chips; the rest keep their raw codes
-- **Power:** a diagram of power flowing from the adapter and battery to the display, charging, devices on USB like a charging iPhone, and the rest of the Mac, plus a window with adapter details, battery health, and graphs. AirPods and other accessories that report a charge are listed too. An iPhone charging by cable doesn't share its battery level with the Mac, so that isn't shown
+- **Power:** a diagram of power flowing from the adapter and battery to the display, charging, devices on USB like a charging iPhone, and the rest of the Mac, with a history graph of the power used and coming in. A window adds adapter details, battery health, and more graphs. AirPods and other accessories that report a charge are listed too. An iPhone charging by cable doesn't share its battery level with the Mac, so that isn't shown
 - **Countries:** an optional setting that shows which country each connection goes to, using [DB-IP](https://db-ip.com)'s free country file
 - **Charge limit:** sets the limit built into macOS 27, from 80% to 100%, with Top Up to charge to full once. It doesn't need the fan helper, and FlowGauge doesn't touch battery hardware directly
 - **Graphs:** ranges from 10 minutes to All, which grows with the saved history, with line, area or bar styles
@@ -45,9 +45,9 @@ The Power window, with power flow, battery and adapter details:
 
 ![Power window with a flow diagram, cards and graphs](docs/images/power-window.png)
 
-The Network window, with the flow, app timeline and path check:
+The Network window, with download and upload over time, the flow, app timeline and path check:
 
-![Network window with a flow diagram, speed graph, app timeline, path health and connections](docs/images/network-window.png)
+![Network window with a download history graph, flow diagram, speed graph, app timeline, path health and connections](docs/images/network-window.png)
 
 Drives, CPU and Power panels:
 
