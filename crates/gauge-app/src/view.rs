@@ -472,6 +472,7 @@ const FAN_TOKENS: &[Token] = &[
     token("Preset", "preset"),
 ];
 const BATTERY_TOKENS: &[Token] = &[
+    token("Charge, ⚡ when plugged in", "status"),
     token("Power use", "load"),
     token("Incoming power", "input"),
     token("Battery charge", "percent"),
@@ -505,7 +506,7 @@ pub fn default_template(module: &str) -> &'static str {
         "gpu" => "GPU {percent}",
         "drives" => "{free} free",
         "fans" => "{rpm} rpm {temp}",
-        "battery" => "⚡︎{load}",
+        "battery" => "{status}",
         _ => "",
     }
 }
@@ -597,6 +598,12 @@ fn token_value(module: &str, name: &str, latest: &Latest, settings: &Settings) -
                 .or(latest.battery.as_ref().and_then(|b| b.input_watts))
                 .map(format_watts),
         ),
+        // Like the system battery item, so this can stand in for it. Macs without a battery get
+        // their power use instead.
+        ("battery", "status") => match latest.battery.as_ref().and_then(|b| b.percent.map(|p| (p, b.external_power == Some(true)))) {
+            Some((percent, plugged)) => Some(format!("{}{percent}%", if plugged { "⚡︎" } else { "" })),
+            None => token_value(module, "load", latest, settings).map(|watts| format!("⚡︎{watts}")),
+        },
         ("battery", "today") => Some(format_energy(latest.energy_today_wh)),
         ("battery", "percent") => or_missing(latest.battery.as_ref().and_then(|b| b.percent).map(|p| format!("{p}%"))),
         ("battery", "power") => or_missing(latest.battery.as_ref().and_then(|b| b.power_watts).map(|w| format!("{:.1} W", w.abs()))),
@@ -1366,9 +1373,21 @@ mod tests {
     }
 
     #[test]
-    fn the_power_item_shows_what_the_mac_is_using() {
-        let latest = Latest { battery: Some(plugged_in()), ..Latest::default() };
+    fn the_power_item_shows_the_charge_like_the_system_battery() {
+        let plugged = Latest { battery: Some(plugged_in()), ..Latest::default() };
+        assert_eq!(bar_title("battery", &plugged, &Settings::default()), "⚡︎80%");
+        let unplugged = Battery { external_power: Some(false), charging: Some(false), percent: Some(62), ..plugged_in() };
+        let on_battery = Latest { battery: Some(unplugged), ..Latest::default() };
+        assert_eq!(bar_title("battery", &on_battery, &Settings::default()), "62%");
+    }
+
+    #[test]
+    fn the_power_item_shows_power_use_on_a_mac_without_a_battery() {
+        let no_charge = Battery { percent: None, ..plugged_in() };
+        let latest = Latest { battery: Some(no_charge), ..Latest::default() };
         assert_eq!(bar_title("battery", &latest, &Settings::default()), "⚡︎28 W");
+        let desktop = Latest { power: Some(sample(0.0, 0.0, 45.0, 0.0)), ..Latest::default() };
+        assert_eq!(bar_title("battery", &desktop, &Settings::default()), "⚡︎45 W");
     }
 
     #[test]
