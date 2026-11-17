@@ -1032,6 +1032,13 @@ impl Controller {
         println!("     remote connections with a country: {placed} of {remote} (countries are {})", if self.settings().show_countries { "on" } else { "off" });
         let dots = self.ivars().network_window.borrow().as_ref().map_or(0, |w| w.moving_dots());
         println!("     moving dots: {dots} (none is right when idle or with Reduce Motion on)");
+        match self.ivars().network_window.borrow().as_ref().and_then(|w| w.hover_for_test()) {
+            Some(card) => {
+                println!("     hover card: {}", card.lines().take(2).collect::<Vec<_>>().join(" / "));
+                check("resting on an app shows its details", card.lines().count() >= 2);
+            }
+            None => println!("     no flow right now, so hovering wasn't tried"),
+        }
         let clicked = self.ivars().network_window.borrow().as_ref().and_then(|w| w.click_other_for_test());
         match clicked {
             Some(listed) => check("clicking Other lists the apps inside it", listed),

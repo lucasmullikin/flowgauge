@@ -92,7 +92,7 @@ pub struct Panel {
     details: Retained<NSTextField>,
     fan: Option<FanControls>,
     charge: Option<ChargeControls>,
-    network: Option<NetworkControls>,
+    pub network: Option<NetworkControls>,
     last_content: RefCell<Content>,
     last_graph_at: Cell<i64>,
 }

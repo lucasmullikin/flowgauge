@@ -431,6 +431,11 @@ impl NetworkWindow {
         *self.history_apps.borrow_mut() = app_lists;
     }
 
+    /// The hover card's text for the flow's first app. `None` when there's no flow.
+    pub fn hover_for_test(&self) -> Option<String> {
+        self.flow.hover_first_app_for_test()
+    }
+
     /// Clicks the flow's "Other" the way a person would, and says whether the list switched to
     /// the apps inside it. `None` when the flow has no Other to click.
     pub fn click_other_for_test(&self) -> Option<bool> {

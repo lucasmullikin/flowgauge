@@ -8,7 +8,7 @@ use crate::view::Latest;
 use crate::worker::{self, NO_MODULE, Shared};
 use gauge_core::history::History;
 use gauge_core::settings::{MODULES, Settings};
-use objc2::AnyThread;
+use objc2::{AnyThread, MainThreadOnly};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2_app_kit::{
@@ -132,7 +132,7 @@ fn on_background(mtm: MainThreadMarker, view: &NSView, dark: bool) -> Retained<N
 pub fn run(args: &[String]) -> Result<(), String> {
     let mtm = MainThreadMarker::new().ok_or("not on the main thread")?;
     let [kind, name, path, rest @ ..] = args else {
-        return Err("usage: --render panel MODULE FILE [dark] [real] | power x FILE [dark] | network x FILE [dark] | settings PAGE FILE [dark] | gallery a,b,c FILE [dark]".into());
+        return Err("usage: --render panel MODULE FILE [dark] [real] [hover] | power x FILE [dark] | network x FILE [dark] | settings PAGE FILE [dark] | gallery a,b,c FILE [dark]".into());
     };
     let dark = rest.iter().any(|a| a == "dark");
     let dummy: Retained<NSObject> = NSObject::new();
@@ -197,7 +197,28 @@ pub fn run(args: &[String]) -> Result<(), String> {
             let history = shared.history.lock().map_err(|e| e.to_string())?;
             let drawn_at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(now, |d| d.as_secs() as i64);
             panel.refresh_graphs(&history, &settings, drawn_at, true);
-            write_png(&on_background(mtm, panel.root_view(), dark), path)
+            let plate = on_background(mtm, panel.root_view(), dark);
+            if rest.iter().any(|a| a == "hover") {
+                // The card follows the pointer in a window of its own, so the panel needs one too.
+                let network = panel.network.as_ref().ok_or("only the network panel has a hover card")?;
+                // SAFETY: a borderless window made on the main thread and never closed.
+                let holder = unsafe {
+                    let holder = objc2_app_kit::NSWindow::initWithContentRect_styleMask_backing_defer(
+                        objc2_app_kit::NSWindow::alloc(mtm),
+                        plate.frame(),
+                        objc2_app_kit::NSWindowStyleMask::Borderless,
+                        objc2_app_kit::NSBackingStoreType::Buffered,
+                        false,
+                    );
+                    holder.setReleasedWhenClosed(false);
+                    holder
+                };
+                holder.setContentView(Some(&plate));
+                network.flow.hover_first_app().ok_or("nothing to hover")?;
+                let card = network.flow.card_view().ok_or("no card")?;
+                write_png(&card, &path.replace(".png", "-card.png"))?;
+            }
+            write_png(&plate, path)
         }
         "power" => {
             let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);

@@ -24,7 +24,7 @@ On the MacBook Pro, fan control has been tested with both fans moving between 2,
 
 ## Features
 
-- **Network:** a flow diagram from your connection to apps to where their traffic goes, with soft points of light drifting along it while data moves. Also live speed with a history graph of download and upload, data used today and this month, Wi-Fi signal, the DNS server in use, recent connections, and a check of each step to the internet. The menu bar item keeps a steady width so the items beside it don't shift
+- **Network:** a flow diagram from your connection to apps to where their traffic goes, with soft points of light drifting along it while data moves. Rest the pointer on an app, a destination or a path between them to see its download and upload, its share of traffic, where it goes or comes from, and the connections behind it with their addresses and delays. Also live speed with a history graph of download and upload, data used today and this month, Wi-Fi signal, the DNS server in use, recent connections, and a check of each step to the internet. The menu bar item keeps a steady width so the items beside it don't shift
 - **Network window:** a graph of how much came in and went out, above the flow, for now, today or the last 7 days, with that period's totals. Also speed history, which apps used the network hour by hour for up to 90 days, path health with the DNS server in use, and recent connections, which stay listed for a minute after they go quiet
 - **Memory:** pressure, app, wired, compressed, cached, swap, and top apps
 - **CPU and GPU:** total and per-core load, load average, GPU use, and top apps

@@ -1,7 +1,7 @@
 //! What the Network panel and window show: the flow from your connection to apps to
 //! destinations, the path check, and the app timeline. Pure, so it's testable.
 
-use crate::view::{Latest, format_bytes, format_rate};
+use crate::view::{Latest, format_bytes, format_rate, shorten};
 use gauge_core::history::AppHour;
 use gauge_core::names::short_domain;
 use gauge_core::pathcheck::{Health, Step};
@@ -263,6 +263,133 @@ pub struct FlowLink {
     pub destination: usize,
     pub down: f64,
     pub up: f64,
+    /// The remote addresses behind it, busiest first.
+    pub hosts: Vec<FlowHost>,
+}
+
+/// One remote address behind a link, for the hover details.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlowHost {
+    pub name: String,
+    /// The address, country, delay and quiet time, where they add to the name.
+    pub detail: String,
+    pub down: f64,
+    pub up: f64,
+}
+
+impl FlowHost {
+    pub fn total(&self) -> f64 {
+        self.down + self.up
+    }
+}
+
+/// Part of the flow the pointer can rest on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowTarget {
+    Source,
+    App(usize),
+    Destination(usize),
+    Link(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoverStyle {
+    Title,
+    Heading,
+    Row,
+    Faint,
+}
+
+const HOVER_ROWS: usize = 3;
+const HOVER_NAME_CHARS: usize = 30;
+
+/// One entry per name, busiest first.
+fn merge_hosts<'a>(hosts: impl IntoIterator<Item = &'a FlowHost>) -> Vec<FlowHost> {
+    let mut by_name: BTreeMap<&str, FlowHost> = BTreeMap::new();
+    for host in hosts {
+        by_name
+            .entry(&host.name)
+            .and_modify(|h| {
+                h.down += host.down;
+                h.up += host.up;
+            })
+            .or_insert_with(|| host.clone());
+    }
+    let mut merged: Vec<FlowHost> = by_name.into_values().filter(|h| h.total() > 0.0).collect();
+    merged.sort_by(|a, b| b.total().total_cmp(&a.total()).then_with(|| a.name.cmp(&b.name)));
+    merged
+}
+
+/// What the hover card says about part of the flow: a title, the amounts each way, where it
+/// goes or comes from, and the connections behind it.
+pub fn hover_lines(flow: &NetFlow, target: FlowTarget) -> Vec<(HoverStyle, String)> {
+    let mut lines = Vec::new();
+    let all = flow.total().max(f64::MIN_POSITIVE);
+    let summary = |title: String, down: f64, up: f64, lines: &mut Vec<(HoverStyle, String)>| {
+        lines.push((HoverStyle::Title, title));
+        let share = (down + up) / all * 100.0;
+        let share = if share >= 99.5 { "all traffic".to_string() } else { format!("{share:.0}% of traffic") };
+        lines.push((HoverStyle::Faint, format!("↓ {}   ↑ {}   {share}", flow.format(down), flow.format(up))));
+    };
+    let rows = |heading: &str, mut items: Vec<(String, f64)>, lines: &mut Vec<(HoverStyle, String)>| {
+        items.retain(|(_, amount)| *amount > 0.0);
+        items.sort_by(|a, b| b.1.total_cmp(&a.1));
+        if items.is_empty() {
+            return;
+        }
+        lines.push((HoverStyle::Heading, heading.to_string()));
+        for (name, amount) in items.iter().take(HOVER_ROWS) {
+            lines.push((HoverStyle::Row, format!("{}\t{}", shorten(name, HOVER_NAME_CHARS), flow.format(*amount))));
+        }
+        if items.len() > HOVER_ROWS {
+            lines.push((HoverStyle::Faint, format!("and {} more", items.len() - HOVER_ROWS)));
+        }
+    };
+    let connections = |links: &[&FlowLink], lines: &mut Vec<(HoverStyle, String)>| {
+        let hosts = merge_hosts(links.iter().flat_map(|l| &l.hosts));
+        if hosts.is_empty() {
+            return;
+        }
+        lines.push((HoverStyle::Heading, "Connections".into()));
+        for host in hosts.iter().take(HOVER_ROWS) {
+            lines.push((HoverStyle::Row, format!("{}\t{}", shorten(&host.name, HOVER_NAME_CHARS), flow.format(host.total()))));
+            if !host.detail.is_empty() {
+                lines.push((HoverStyle::Faint, host.detail.clone()));
+            }
+        }
+        if hosts.len() > HOVER_ROWS {
+            lines.push((HoverStyle::Faint, format!("and {} more", hosts.len() - HOVER_ROWS)));
+        }
+    };
+    let label = |nodes: &[FlowNode], i: usize| nodes.get(i).map_or_else(String::new, |n| n.label.clone());
+    match target {
+        FlowTarget::Source => {
+            let (down, up) = flow.apps.iter().fold((0.0, 0.0), |(d, u), a| (d + a.down, u + a.up));
+            summary(flow.source.clone(), down, up, &mut lines);
+            rows("Apps", flow.apps.iter().map(|a| (a.label.clone(), a.total())).collect(), &mut lines);
+        }
+        FlowTarget::App(i) => {
+            let Some(app) = flow.apps.get(i) else { return lines };
+            summary(app.label.clone(), app.down, app.up, &mut lines);
+            let links: Vec<&FlowLink> = flow.links.iter().filter(|l| l.app == i).collect();
+            rows("Going to", links.iter().map(|l| (label(&flow.destinations, l.destination), l.down + l.up)).collect(), &mut lines);
+            connections(&links, &mut lines);
+        }
+        FlowTarget::Destination(i) => {
+            let Some(destination) = flow.destinations.get(i) else { return lines };
+            summary(destination.label.clone(), destination.down, destination.up, &mut lines);
+            let links: Vec<&FlowLink> = flow.links.iter().filter(|l| l.destination == i).collect();
+            rows("From", links.iter().map(|l| (label(&flow.apps, l.app), l.down + l.up)).collect(), &mut lines);
+            connections(&links, &mut lines);
+        }
+        FlowTarget::Link(i) => {
+            let Some(link) = flow.links.get(i) else { return lines };
+            let title = format!("{} to {}", label(&flow.apps, link.app), label(&flow.destinations, link.destination));
+            summary(title, link.down, link.up, &mut lines);
+            connections(&[link], &mut lines);
+        }
+    }
+    lines
 }
 
 /// `live` flows are in bytes per second and move. Others are totals over a period.
@@ -290,7 +417,8 @@ pub struct AppEntry {
     pub app: String,
     pub down: f64,
     pub up: f64,
-    pub destinations: Vec<(String, f64, f64)>,
+    /// Each connection's destination label, and the address behind it with its traffic.
+    pub destinations: Vec<(String, FlowHost)>,
 }
 
 /// How a remote address is labeled: the local network, its country when locations are on,
@@ -320,8 +448,8 @@ pub fn build_flow(source: &str, entries: &[AppEntry], live: bool, limits: Limits
     let mut destination_totals: BTreeMap<String, f64> = BTreeMap::new();
     for entry in entries {
         *app_totals.entry(entry.app.clone()).or_default() += entry.down + entry.up;
-        for (label, down, up) in &entry.destinations {
-            *destination_totals.entry(label.clone()).or_default() += down + up;
+        for (label, host) in &entry.destinations {
+            *destination_totals.entry(label.clone()).or_default() += host.total();
         }
     }
     let crowded_apps = app_totals.len() > limits.apps;
@@ -334,7 +462,7 @@ pub fn build_flow(source: &str, entries: &[AppEntry], live: bool, limits: Limits
     let mut apps: Vec<FlowNode> = kept_apps.iter().map(|l| FlowNode { label: l.clone(), down: 0.0, up: 0.0 }).collect();
     let mut destinations: Vec<FlowNode> =
         kept_destinations.iter().map(|l| FlowNode { label: l.clone(), down: 0.0, up: 0.0 }).collect();
-    let mut links: BTreeMap<(usize, usize), (f64, f64)> = BTreeMap::new();
+    let mut links: BTreeMap<(usize, usize), (f64, f64, Vec<FlowHost>)> = BTreeMap::new();
     let index_or_other = |nodes: &mut Vec<FlowNode>, label: &str, kept: &[String]| -> usize {
         let wanted = if kept.iter().any(|k| k == label) { label } else { OTHER };
         match nodes.iter().position(|n| n.label == wanted) {
@@ -350,12 +478,13 @@ pub fn build_flow(source: &str, entries: &[AppEntry], live: bool, limits: Limits
         apps[app].down += entry.down;
         apps[app].up += entry.up;
         let (mut down_left, mut up_left) = (entry.down, entry.up);
-        for (label, down, up) in &entry.destinations {
+        for (label, host) in &entry.destinations {
             let destination = index_or_other(&mut destinations, label, &kept_destinations);
             let link = links.entry((app, destination)).or_default();
-            let (down, up) = (down.min(down_left), up.min(up_left));
+            let (down, up) = (host.down.min(down_left), host.up.min(up_left));
             link.0 += down;
             link.1 += up;
+            link.2.push(FlowHost { down, up, ..host.clone() });
             down_left -= down;
             up_left -= up;
         }
@@ -366,14 +495,14 @@ pub fn build_flow(source: &str, entries: &[AppEntry], live: bool, limits: Limits
             link.1 += up_left;
         }
     }
-    for ((_, destination), (down, up)) in &links {
+    for ((_, destination), (down, up, _)) in &links {
         destinations[*destination].down += down;
         destinations[*destination].up += up;
     }
     let links: Vec<FlowLink> = links
         .into_iter()
-        .filter(|(_, (down, up))| down + up > 0.0)
-        .map(|((app, destination), (down, up))| FlowLink { app, destination, down, up })
+        .filter(|(_, (down, up, _))| down + up > 0.0)
+        .map(|((app, destination), (down, up, hosts))| FlowLink { app, destination, down, up, hosts: merge_hosts(&hosts) })
         .collect();
     let flow = NetFlow { source: source.to_string(), apps, destinations, links, live };
     (flow.total() > 0.0).then_some(flow)
@@ -392,6 +521,26 @@ pub fn source_label(latest: &Latest) -> String {
     }
 }
 
+/// A remote address named the way the hover card lists it.
+fn host_entry(address: &IpAddr, name: Option<String>, country: Option<String>, rtt_ms: Option<f32>, idle: f64, down: f64, up: f64) -> FlowHost {
+    let mut detail = Vec::new();
+    if name.is_some() {
+        detail.push(address.to_string());
+    }
+    detail.extend(country);
+    if let Some(rtt) = rtt_ms {
+        detail.push(format!("{rtt:.0} ms away"));
+    }
+    if idle >= SHOW_IDLE_SECONDS {
+        detail.push(format!("idle {idle:.0} s"));
+    }
+    FlowHost { name: name.unwrap_or_else(|| address.to_string()), detail: detail.join(", "), down, up }
+}
+
+fn live_host(d: &DestinationNow) -> FlowHost {
+    host_entry(&d.address, d.name.clone(), d.country.clone(), d.rtt_ms, d.idle_seconds, d.down, d.up)
+}
+
 pub fn live_flow(latest: &Latest, limits: Limits) -> Option<NetFlow> {
     let traffic = latest.traffic.as_ref()?;
     let entries: Vec<AppEntry> = traffic
@@ -405,7 +554,7 @@ pub fn live_flow(latest: &Latest, limits: Limits) -> Option<NetFlow> {
             destinations: app
                 .destinations
                 .iter()
-                .map(|d| (destination_label(&d.address, d.name.as_deref(), d.country.as_deref()), d.down, d.up))
+                .map(|d| (destination_label(&d.address, d.name.as_deref(), d.country.as_deref()), live_host(d)))
                 .collect(),
         })
         .collect();
@@ -436,7 +585,9 @@ pub fn history_flow(
                 .filter_map(|((_, host), (d, u))| {
                     let address: IpAddr = host.parse().ok()?;
                     let (name, country) = if is_local(&address) { (None, None) } else { (name_of(address), country_of(address)) };
-                    Some((destination_label(&address, name.as_deref(), country.as_deref()), *d as f64, *u as f64))
+                    let label = destination_label(&address, name.as_deref(), country.as_deref());
+                    let host = host_entry(&address, name, country, None, 0.0, *d as f64, *u as f64);
+                    Some((label, host))
                 })
                 .collect();
             AppEntry { app: display_name(&app), down, up, destinations }
@@ -652,8 +803,53 @@ mod tests {
             app: app.into(),
             down,
             up: 0.0,
-            destinations: destinations.iter().map(|(l, d)| (l.to_string(), *d, 0.0)).collect(),
+            destinations: destinations
+                .iter()
+                .map(|(l, d)| (l.to_string(), FlowHost { name: format!("host.{l}"), detail: String::new(), down: *d, up: 0.0 }))
+                .collect(),
         }
+    }
+
+    #[test]
+    fn hovering_an_app_lists_where_it_goes_and_its_connections() {
+        let entries = vec![
+            entry("Safari", 900.0, &[("example.net", 600.0), ("example.org", 300.0)]),
+            entry("Mail", 100.0, &[("example.net", 100.0)]),
+        ];
+        let flow = build_flow("Wi-Fi", &entries, true, PANEL).unwrap();
+        let lines = hover_lines(&flow, FlowTarget::App(0));
+        assert_eq!(lines[0], (HoverStyle::Title, "Safari".to_string()));
+        assert!(lines[1].1.ends_with("90% of traffic"), "{:?}", lines[1]);
+        assert_eq!(lines[2], (HoverStyle::Heading, "Going to".to_string()));
+        assert!(lines[3].1.starts_with("example.net\t"), "{:?}", lines[3]);
+        assert!(lines.iter().any(|l| l.1.starts_with("host.example.org\t")), "{lines:?}");
+    }
+
+    #[test]
+    fn hovering_a_destination_or_link_merges_its_connections() {
+        let entries = vec![
+            entry("Safari", 600.0, &[("example.net", 600.0)]),
+            entry("Mail", 100.0, &[("example.net", 100.0)]),
+        ];
+        let flow = build_flow("Wi-Fi", &entries, true, PANEL).unwrap();
+        let destination = hover_lines(&flow, FlowTarget::Destination(0));
+        assert_eq!(destination[2], (HoverStyle::Heading, "From".to_string()));
+        let rows: Vec<&String> = destination.iter().filter(|l| l.1.starts_with("host.example.net\t")).map(|l| &l.1).collect();
+        assert_eq!(rows.len(), 1, "one row for the shared host: {destination:?}");
+        assert!(rows[0].ends_with(&flow.format(700.0)));
+        let link = hover_lines(&flow, FlowTarget::Link(0));
+        assert!(link[0].1.contains(" to example.net"), "{link:?}");
+        assert!(hover_lines(&flow, FlowTarget::App(9)).is_empty());
+    }
+
+    #[test]
+    fn host_details_say_what_the_name_does_not() {
+        let address: IpAddr = "203.0.113.9".parse().unwrap();
+        let named = host_entry(&address, Some("edge.example.net".into()), Some("Germany".into()), Some(24.4), 40.0, 1.0, 0.0);
+        assert_eq!(named.name, "edge.example.net");
+        assert_eq!(named.detail, "203.0.113.9, Germany, 24 ms away, idle 40 s");
+        let bare = host_entry(&address, None, None, None, 0.0, 1.0, 0.0);
+        assert_eq!((bare.name.as_str(), bare.detail.as_str()), ("203.0.113.9", ""));
     }
 
     #[test]
