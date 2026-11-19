@@ -1070,6 +1070,32 @@ impl Controller {
         for page in 0..settings_form::PAGES.len() as i64 {
             self.show_settings_page(page);
         }
+        let network_index = MODULES.iter().position(|m| *m == "network").unwrap_or(0);
+        let network_button = {
+            let modules = self.ivars().modules.borrow();
+            modules.iter().find(|m| m.index == network_index).and_then(|m| m.item.button(mtm))
+        };
+        if let Some(network_button) = network_button {
+            self.on_toggle(&network_button);
+            self.spin(2.0);
+            let in_front = {
+                let modules = self.ivars().modules.borrow();
+                modules.iter().find(|m| m.index == network_index).and_then(|m| m.panel.network.as_ref()).and_then(|n| {
+                    n.flow.hover_first_app()?;
+                    let in_front = n.flow.card_in_front();
+                    n.flow.hover(None);
+                    in_front
+                })
+            };
+            match in_front {
+                Some(ok) => check("the panel's hover card is whole and in front of the panel", ok),
+                None => println!("     no flow in the network panel right now, so its hover card wasn't tried"),
+            }
+            self.on_toggle(&network_button);
+            self.spin(0.5);
+        } else {
+            println!("     the network item is hidden, so its panel's hover card wasn't tried");
+        }
         check("every settings page builds", true);
         check("panel closes when settings open", !shown(self));
         passed

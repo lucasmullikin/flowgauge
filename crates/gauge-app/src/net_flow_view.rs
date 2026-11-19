@@ -11,7 +11,7 @@ use objc2_app_kit::{
     NSAppearanceCustomization, NSBox, NSBoxType, NSColor, NSEvent, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSLineBreakMode,
     NSMutableParagraphStyle, NSParagraphStyleAttributeName, NSStringDrawing, NSTextAlignment, NSTextField, NSTextTab,
     NSBackingStoreType, NSPanel, NSTitlePosition, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindowOrderingMode,
-    NSWindowStyleMask,
+    NSWindow, NSWindowNumberListOptions, NSWindowStyleMask,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSAttributedString, NSDictionary, NSMutableAttributedString, NSPoint, NSRect, NSSize, NSString,
@@ -350,7 +350,7 @@ impl NetFlowView {
     }
 
     /// Shows the details for whatever is under `point`, or hides them when it's `None`.
-    fn hover(&self, point: Option<NSPoint>) {
+    pub fn hover(&self, point: Option<NSPoint>) {
         self.ivars().pointer.set(point);
         let target = {
             let flow = self.ivars().flow.borrow();
@@ -416,6 +416,8 @@ impl NetFlowView {
         label.setFrameSize(NSSize::new(CARD_TEXT_WIDTH, fitting.height));
         card.sizeToFit();
         let size = card.frame().size;
+        // sizeToFit moves the box as well as sizing it; as the window's content it belongs at its corner.
+        card.setFrameOrigin(NSPoint::ZERO);
         let at = parent.convertPointToScreen(self.convertPoint_toView(point, None));
         let mut origin = NSPoint::new(at.x + CARD_GAP, at.y - CARD_GAP - size.height);
         if let Some(screen) = parent.screen() {
@@ -436,6 +438,18 @@ impl NetFlowView {
             unsafe { parent.addChildWindow_ordered(window, NSWindowOrderingMode::Above) };
         }
         window.orderFront(None);
+    }
+
+    /// Whether the card is on screen, whole, in front of this view's window, for the self-test.
+    pub fn card_in_front(&self) -> Option<bool> {
+        let parent = self.window()?;
+        let card = self.ivars().card.borrow();
+        let (window, card_box, _) = card.as_ref()?;
+        let whole = card_box.frame() == NSRect::new(NSPoint::ZERO, window.frame().size);
+        let order = NSWindow::windowNumbersWithOptions(NSWindowNumberListOptions::empty(), self.mtm())?;
+        let position = |number: isize| (0..order.count()).position(|i| order.objectAtIndex(i).integerValue() == number);
+        let (card, panel) = (position(window.windowNumber()), position(parent.windowNumber()));
+        Some(whole && window.isVisible() && matches!((card, panel), (Some(c), Some(p)) if c < p))
     }
 
     /// The card, for pictures.
