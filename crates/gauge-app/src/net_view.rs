@@ -626,6 +626,7 @@ pub fn display_name(raw: &str) -> String {
         "ControlCenter" => "Control Center",
         "locationd" => "Location Services",
         "adprivacyd" | "searchpartyd" => "Find My",
+        "io.tailscale.ip" | "tailscaled" => "Tailscale",
         _ => return raw.to_string(),
     };
     friendly.to_string()
@@ -1020,6 +1021,7 @@ mod tests {
     fn services_get_plain_names_and_merge() {
         assert_eq!(display_name("nsurlsessiond"), "Background downloads");
         assert_eq!(display_name("Safari"), "Safari");
+        assert_eq!(display_name("io.tailscale.ip"), "Tailscale");
         let rows = app_rows(
             &[("configd".into(), 10.0, 0.0), ("airportd".into(), 5.0, 0.0), ("Mail".into(), 1.0, 100.0)],
             0,
