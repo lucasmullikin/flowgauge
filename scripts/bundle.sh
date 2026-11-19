@@ -4,6 +4,7 @@ set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 cargo build --release -p gauge-app -p gauge-fand -p gauge
+commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
 app="$HOME/Applications/FlowGauge.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
@@ -20,6 +21,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>gauge-app</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>FlowGaugeCommit</key><string>$commit</string>
   <key>LSUIElement</key><true/>
   <key>NSLocationUsageDescription</key><string>macOS treats your Wi-Fi network name as location data. FlowGauge only shows the name in its Network panel.</string>
   <key>NSLocationWhenInUseUsageDescription</key><string>macOS treats your Wi-Fi network name as location data. FlowGauge only shows the name in its Network panel.</string>
